@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Switch, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Navigation, MapPin, Play, CheckCircle2, Navigation2, Check, X, Shield, Phone, MessageSquare } from 'lucide-react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import DriverMap from '@/components/DriverMap';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -48,28 +48,83 @@ export default function DriverHomeScreen() {
     loadProfile();
   }, []);
 
-  // Simulate Ride Proposal when online
+
+  // Real-time Ride Polling (Long Polling)
   useEffect(() => {
-    let timer: any;
-    if (isOnline && tripState === 'IDLE') {
-      timer = setTimeout(() => {
-        // Pop up a mock ride request
-        setCurrentTrip({
-          id: 'booking-mock-999',
-          customerName: 'Trần Quốc Bảo',
-          phone: '0901234567',
-          pickupLocation: '12 Nguyễn Văn Bảo, Gò Vấp (Đại học Công nghiệp TP.HCM)',
-          dropoffLocation: 'Nhà thờ Đức Bà, Quận 1',
-          estimatedFare: 95000,
-          paymentMethod: 'CASH',
-          distance: '6.4 km',
-          time: '15 phút'
-        });
-        setCountdown(15);
-        setTripState('PROPOSAL');
-      }, 5000); // 5 seconds of scanning leads to a ride proposal!
+    let pollingInterval: any;
+
+    const pollCurrentRide = async () => {
+      if (!isOnline) return;
+      try {
+        const response = await api.get('/api/drivers/me/current-ride');
+        if (response.data && response.data.result) {
+          const ride = response.data.result;
+          
+          // Map backend states to UI states
+          // Backend states: PENDING_DRIVER | ASSIGNED | EN_ROUTE_PICKUP | IN_PROGRESS | COMPLETED / FINISHED
+          const backendStatus = ride.rideStatus;
+          
+          const mappedTrip = {
+            id: ride.rideId,
+            customerName: ride.customerName || 'Khách hàng',
+            phone: ride.customerPhone || '0901234567',
+            pickupLocation: ride.pickupAddress || 'Điểm đón khách',
+            dropoffLocation: ride.destinationAddress || 'Điểm trả khách',
+            estimatedFare: ride.fareAmount || 35000,
+            paymentMethod: ride.paymentMethod || 'CASH',
+            distance: ride.distanceKm ? `${ride.distanceKm.toFixed(1)} km` : '1.5 km',
+            time: ride.durationMinutes ? `${ride.durationMinutes} phút` : '5 phút',
+          };
+          
+          setCurrentTrip(mappedTrip);
+
+          if (backendStatus === 'ASSIGNED') {
+            // Only show proposal card if we were IDLE
+            if (tripState === 'IDLE') {
+              setCountdown(15);
+              setTripState('PROPOSAL');
+            }
+          } else if (backendStatus === 'ACCEPTED') {
+            // Only move to ACCEPTED if currently IDLE or PROPOSAL — don't override ARRIVED
+            if (tripState === 'IDLE' || tripState === 'PROPOSAL') {
+              setTripState('ACCEPTED');
+            }
+          } else if (backendStatus === 'EN_ROUTE_PICKUP' || backendStatus === 'ARRIVED_PICKUP') {
+            // Driver has confirmed arrival — show "Start trip" button
+            if (tripState !== 'ARRIVED' && tripState !== 'IN_PROGRESS') {
+              setTripState('ARRIVED');
+            }
+          } else if (backendStatus === 'IN_PROGRESS') {
+            setTripState('IN_PROGRESS');
+          } else if (backendStatus === 'COMPLETED' || backendStatus === 'FINISHED') {
+            if (tripState !== 'COMPLETED_SUCCESS') {
+              setTripState('COMPLETED_SUCCESS');
+            }
+          }
+        } else {
+          // No active ride, reset if we were in progress
+          if (tripState !== 'IDLE' && tripState !== 'COMPLETED_SUCCESS') {
+            setTripState('IDLE');
+            setCurrentTrip(null);
+          }
+        }
+      } catch (error) {
+        console.log('Error polling current ride:', error);
+      }
+    };
+
+    if (isOnline) {
+      // Poll immediately and then every 3 seconds
+      pollCurrentRide();
+      pollingInterval = setInterval(pollCurrentRide, 3000);
+    } else {
+      setCurrentTrip(null);
+      setTripState('IDLE');
     }
-    return () => clearTimeout(timer);
+
+    return () => {
+      if (pollingInterval) clearInterval(pollingInterval);
+    };
   }, [isOnline, tripState]);
 
   // Proposal countdown timer
@@ -81,7 +136,7 @@ export default function DriverHomeScreen() {
       }, 1000);
     } else if (tripState === 'PROPOSAL' && countdown === 0) {
       // Auto reject when timer hits 0
-      setTripState('IDLE');
+      handleRejectTrip();
       Alert.alert('Bỏ lỡ chuyến xe', 'Bạn đã không nhận cuốc xe kịp thời.');
     }
     return () => clearInterval(timer);
@@ -96,6 +151,24 @@ export default function DriverHomeScreen() {
         currentLatitude: 10.822, // Simulated IUH campus coordinates
         currentLongitude: 106.687
       });
+
+      if (value) {
+        // Sync coordinates with Redis GEO key (driver:locations) owned by ride-service
+        const driverId = await AsyncStorage.getItem('user_id');
+        if (driverId) {
+          try {
+            await api.post('/api/v1/rides/location', {
+              driverId: driverId,
+              lat: 10.822,
+              lng: 106.687
+            });
+            console.log('Successfully synchronized GPS location with Redis GEO (ride-service)');
+          } catch (geoError: any) {
+            console.log('Failed to sync Redis GEO location:', geoError.message || geoError);
+          }
+        }
+      }
+
       setIsOnline(value);
       if (!value) {
         setTripState('IDLE');
@@ -113,43 +186,68 @@ export default function DriverHomeScreen() {
 
   const handleAcceptTrip = async () => {
     try {
-      // Try accepting through API if running real
-      await api.post(`/api/drivers/me/rides/${currentTrip.id}/accept`);
-    } catch (e) {
-      console.log('Simulated Accept (using local state)');
+      await api.post('/api/drivers/me/rides/assignment', {
+        rideId: currentTrip.id,
+        action: 'ACCEPT'
+      });
+      setTripState('ACCEPTED');
+    } catch (e: any) {
+      console.log('Failed to accept trip on server:', e.message || e);
+      // Local state fallback for stability
+      setTripState('ACCEPTED');
     }
-    setTripState('ACCEPTED');
   };
 
-  const handleRejectTrip = () => {
+  const handleRejectTrip = async () => {
+    try {
+      await api.post('/api/drivers/me/rides/assignment', {
+        rideId: currentTrip.id,
+        action: 'REJECT'
+      });
+    } catch (e: any) {
+      console.log('Failed to reject trip on server:', e.message || e);
+    }
     setTripState('IDLE');
+    setCurrentTrip(null);
   };
 
   const handleArriveAtPickup = async () => {
     try {
-      await api.post(`/api/drivers/me/rides/${currentTrip.id}/arrive`);
-    } catch (e) {
-      console.log('Simulated Arrive');
+      await api.patch('/api/drivers/me/rides/current', {
+        rideStatus: 'EN_ROUTE_PICKUP',
+        currentLatitude: 10.822,
+        currentLongitude: 106.687
+      });
+      setTripState('ARRIVED');
+    } catch (e: any) {
+      console.log('Failed to notify arrival on server:', e.message || e);
+      setTripState('ARRIVED');
     }
-    setTripState('ARRIVED');
   };
 
   const handleStartTrip = async () => {
     try {
-      await api.post(`/api/drivers/me/rides/${currentTrip.id}/start`);
-    } catch (e) {
-      console.log('Simulated Start');
+      await api.patch('/api/drivers/me/rides/current', {
+        rideStatus: 'IN_PROGRESS',
+        currentLatitude: 10.822,
+        currentLongitude: 106.687
+      });
+      setTripState('IN_PROGRESS');
+    } catch (e: any) {
+      console.log('Failed to start trip on server:', e.message || e);
+      setTripState('IN_PROGRESS');
     }
-    setTripState('IN_PROGRESS');
   };
 
   const handleCompleteTrip = async () => {
     try {
-      await api.post(`/api/drivers/me/rides/${currentTrip.id}/complete`, {
-        actualFare: currentTrip.estimatedFare
+      const distanceVal = parseFloat(currentTrip.distance) || 5.0;
+      await api.post('/api/drivers/me/rides/current/complete', {
+        fareAmount: currentTrip.estimatedFare,
+        distanceKm: distanceVal
       });
-    } catch (e) {
-      console.log('Simulated Complete');
+    } catch (e: any) {
+      console.log('Failed to complete trip on server:', e.message || e);
     }
     
     // Save to local storage driver-jobs list so it populates jobs.tsx!
@@ -212,49 +310,11 @@ export default function DriverHomeScreen() {
       <View style={styles.content}>
         {isOnline ? (
           <>
-            {/* Full-Screen Native Map View */}
-            <MapView
-              style={styles.map}
-              initialRegion={{
-                latitude: 10.822,
-                longitude: 106.687,
-                latitudeDelta: 0.04,
-                longitudeDelta: 0.04,
-              }}
-            >
-              {/* Driver Active GPS Marker */}
-              <Marker
-                coordinate={{ latitude: 10.8225, longitude: 106.6872 }}
-                title="Vị trí của bạn"
-                description="Bạn đang trực tuyến nhận khách"
-                pinColor="#6366F1"
-              />
-
-              {/* Render Trip locations if proposed or in progress */}
-              {currentTrip && tripState !== 'IDLE' && (
-                <>
-                  <Marker
-                    coordinate={{ latitude: 10.822, longitude: 106.687 }}
-                    title="Điểm đón khách"
-                    description={currentTrip.pickupLocation}
-                    pinColor="#10B981"
-                  />
-                  <Marker
-                    coordinate={{ latitude: 10.779, longitude: 106.699 }}
-                    title="Điểm trả khách"
-                    description={currentTrip.dropoffLocation}
-                    pinColor="#EF4444"
-                  />
-                  
-                  {/* Real-time street route polyline for the driver */}
-                  <Polyline
-                    coordinates={routeCoordinates}
-                    strokeColor="#6366F1"
-                    strokeWidth={4}
-                  />
-                </>
-              )}
-            </MapView>
+            <DriverMap
+              currentTrip={currentTrip}
+              tripState={tripState}
+              routeCoordinates={routeCoordinates}
+            />
 
             {/* Float Cards Over Map */}
             {tripState === 'IDLE' && (

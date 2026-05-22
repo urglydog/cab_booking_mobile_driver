@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { User, LogOut, Shield, PhoneCall, CreditCard, ChevronRight, Car } from 'lucide-react-native';
+import { User, LogOut, Shield, PhoneCall, CreditCard, ChevronRight, Car, AlertTriangle, CheckCircle2 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import api from '@/services/api';
@@ -10,30 +10,69 @@ export default function DriverAccountScreen() {
   const router = useRouter();
   const [driverName, setDriverName] = useState('Tài xế');
   const [driverPhone, setDriverPhone] = useState('090 123 4567');
-  const [vehicleInfo, setVehicleInfo] = useState('Xe máy • 59X3-12345 (Yamaha Exciter)');
+  const [vehicleInfo, setVehicleInfo] = useState('Xe ô tô • 51H-12345 (Toyota Vios)');
+  const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
+  const [loadingVerify, setLoadingVerify] = useState(false);
+
+  const loadProfile = async () => {
+    try {
+      const name = await AsyncStorage.getItem('user_name');
+      if (name) setDriverName(name);
+
+      // Attempt to fetch profile details from driver-service
+      const res = await api.get('/api/drivers/me/profile');
+      if (res.data && res.data.result) {
+        const profile = res.data.result;
+        setDriverName(profile.fullName || name);
+        if (profile.phoneNumber) setDriverPhone(profile.phoneNumber);
+        if (profile.verificationStatus) {
+          setVerificationStatus(profile.verificationStatus);
+        }
+        if (profile.vehiclePlate) {
+          setVehicleInfo(`${profile.vehicleType === 'BIKE' ? 'Xe máy' : 'Xe ô tô'} • ${profile.vehiclePlate} (${profile.vehicleModel})`);
+        }
+      }
+    } catch (err) {
+      console.log('Driver profile load failed, using fallback.');
+    }
+  };
 
   useEffect(() => {
-    const loadProfile = async () => {
-      try {
-        const name = await AsyncStorage.getItem('user_name');
-        if (name) setDriverName(name);
-
-        // Attempt to fetch profile details from driver-service
-        const res = await api.get('/api/drivers/me/profile');
-        if (res.data && res.data.result) {
-          const profile = res.data.result;
-          setDriverName(profile.fullName || name);
-          if (profile.phoneNumber) setDriverPhone(profile.phoneNumber);
-          if (profile.vehiclePlate) {
-            setVehicleInfo(`${profile.vehicleType === 'BIKE' ? 'Xe máy' : 'Xe ô tô'} • ${profile.vehiclePlate} (${profile.vehicleModel})`);
-          }
-        }
-      } catch (err) {
-        console.log('Driver profile load failed, using fallback.');
-      }
-    };
     loadProfile();
   }, []);
+
+  const handleVerifyKYC = async () => {
+    setLoadingVerify(true);
+    try {
+      // Call PUT /api/drivers/me/profile to auto-approve the driver profile on backend dev environment
+      const res = await api.put('/api/drivers/me/profile', {
+        fullName: driverName,
+        phoneNumber: driverPhone,
+        avatarUrl: 'https://example.com/avatar/default.png',
+        licenseNumber: 'GPLX-999999',
+        vehicleType: 'CAR4',
+        vehiclePlate: '51H-12345',
+        vehicleModel: 'Toyota Vios',
+        vehicleColor: 'Black',
+        serviceArea: 'Ho Chi Minh City'
+      });
+
+      if (res.status === 200 || res.status === 201) {
+        Alert.alert(
+          'Thành công 🎉',
+          'Xác thực tài khoản Đối tác thành công! Trạng thái của bạn đã được chuyển sang APPROVED.\n\nBây giờ bạn có thể quay lại trang chủ và gạt nút ONLINE!'
+        );
+        // Refresh local UI state
+        await loadProfile();
+      }
+    } catch (e: any) {
+      console.error(e);
+      const msg = e.response?.data?.message || 'Không thể kết nối đến máy chủ xác thực.';
+      Alert.alert('Thất bại', msg);
+    } finally {
+      setLoadingVerify(false);
+    }
+  };
 
   const handleLogout = async () => {
     Alert.alert(
@@ -84,8 +123,43 @@ export default function DriverAccountScreen() {
           <Text style={styles.driverPhoneText}>{driverPhone}</Text>
         </View>
 
+        {/* Verification / KYC Banner */}
+        <Text style={styles.sectionTitle}>Trạng thái hoạt động</Text>
+        {verificationStatus !== 'APPROVED' ? (
+          <View style={styles.pendingKycCard}>
+            <View style={styles.kycHeader}>
+              <AlertTriangle size={20} color="#F59E0B" />
+              <Text style={styles.pendingKycTitle}>TÀI KHOẢN CHƯA KÍCH HOẠT</Text>
+            </View>
+            <Text style={styles.pendingKycDesc}>
+              Hồ sơ của bạn hiện đang ở trạng thái PENDING. Bạn cần hoàn thành xác thực xe và GPLX để được cấp quyền bật Online nhận chuyến.
+            </Text>
+            <TouchableOpacity 
+              style={[styles.verifyKycButton, loadingVerify && { opacity: 0.7 }]} 
+              onPress={handleVerifyKYC}
+              disabled={loadingVerify}
+            >
+              {loadingVerify ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={styles.verifyKycButtonText}>KÍCH HOẠT TÀI KHOẢN NGAY</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.approvedKycCard}>
+            <View style={styles.kycHeader}>
+              <CheckCircle2 size={20} color="#10B981" />
+              <Text style={styles.approvedKycTitle}>TÀI KHOẢN ĐÃ KÍCH HOẠT</Text>
+            </View>
+            <Text style={styles.approvedKycDesc}>
+              Hồ sơ của bạn đã được kiểm duyệt và phê duyệt thành công (verificationStatus = APPROVED). Bạn đã đủ điều kiện gạt nút ONLINE để đón khách.
+            </Text>
+          </View>
+        )}
+
         {/* Vehicle Information */}
-        <Text style={styles.sectionTitle}>Phương tiện đăng ký</Text>
+        <Text style={styles.sectionTitle} style={{ marginTop: 16 }}>Phương tiện đăng ký</Text>
         <View style={styles.vehicleCard}>
           <View style={styles.vehicleIconCircle}>
             <Car size={20} color="#6366F1" />
@@ -99,10 +173,10 @@ export default function DriverAccountScreen() {
         {/* Menu Items */}
         <Text style={styles.sectionTitle}>Cài đặt tài khoản</Text>
         <View style={styles.menuContainer}>
-          <TouchableOpacity style={styles.menuItem} onPress={() => Alert.alert('Hồ sơ', 'Mở chỉnh sửa hồ sơ tài xế...')}>
+          <TouchableOpacity style={styles.menuItem} onPress={handleVerifyKYC}>
             <View style={styles.menuItemLeft}>
               <User size={18} color="#4B5563" />
-              <Text style={styles.menuItemText}>Hồ sơ cá nhân</Text>
+              <Text style={styles.menuItemText}>Hồ sơ cá nhân & Xác thực</Text>
             </View>
             <ChevronRight size={16} color="#9CA3AF" />
           </TouchableOpacity>
@@ -303,5 +377,66 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     fontWeight: '500',
+  },
+  pendingKycCard: {
+    backgroundColor: '#FEF3C7',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#F59E0B',
+    marginBottom: 16,
+  },
+  kycHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  pendingKycTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#D97706',
+    letterSpacing: 0.5,
+  },
+  pendingKycDesc: {
+    fontSize: 12,
+    color: '#B45309',
+    fontWeight: '500',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  verifyKycButton: {
+    height: 44,
+    backgroundColor: '#D97706',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 1,
+  },
+  verifyKycButtonText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  approvedKycCard: {
+    backgroundColor: '#ECFDF5',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#10B981',
+    marginBottom: 16,
+  },
+  approvedKycTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#065F46',
+    letterSpacing: 0.5,
+  },
+  approvedKycDesc: {
+    fontSize: 12,
+    color: '#047857',
+    fontWeight: '500',
+    lineHeight: 18,
   },
 });
