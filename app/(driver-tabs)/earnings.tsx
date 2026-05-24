@@ -1,48 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Wallet, ArrowUpRight, TrendingUp, Award, AwardIcon, Percent } from 'lucide-react-native';
+import { Wallet, ArrowUpRight, TrendingUp, Award, Percent } from 'lucide-react-native';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function DriverEarningsScreen() {
-  const [earnings, setEarnings] = useState(195000); // Default matches our 2 seed rides: 45k + 150k
-  const [totalJobs, setTotalJobs] = useState(2);
+  const [earnings, setEarnings] = useState(195000); // Ví tài khoản / Số dư ví
+  const [totalGrossAmount, setTotalGrossAmount] = useState(278571); // Tổng tiền khách trả
+  const [totalDriverAmount, setTotalDriverAmount] = useState(195000); // Doanh thu thực nhận
+  const [totalCompletedRides, setTotalCompletedRides] = useState(2);
+  const [averageRating, setAverageRating] = useState(4.9);
   const [loading, setLoading] = useState(true);
 
   const fetchEarnings = async () => {
     try {
-      // 1. Get from storage
-      const storedEarnings = await AsyncStorage.getItem('driver_earnings');
-      const storedJobsJson = await AsyncStorage.getItem('driver_completed_jobs');
-      
-      const jobs = storedJobsJson ? JSON.parse(storedJobsJson) : [];
-      
-      if (storedEarnings) {
-        setEarnings(parseFloat(storedEarnings));
+      // Try to fetch real database summary from API
+      const response = await api.get('/api/drivers/me/earnings/summary');
+      if (response.data && response.data.result) {
+        const result = response.data.result;
+        setEarnings(result.totalEarnings != null ? result.totalEarnings : 0);
+        setTotalGrossAmount(result.totalGrossAmount != null ? result.totalGrossAmount : 0);
+        setTotalDriverAmount(result.totalDriverAmount != null ? result.totalDriverAmount : 0);
+        setTotalCompletedRides(result.totalCompletedRides != null ? result.totalCompletedRides : 0);
+        setAverageRating(result.averageRating != null ? result.averageRating : 4.9);
       } else {
-        // First time initialization: 195,000đ
-        await AsyncStorage.setItem('driver_earnings', '195000');
-        setEarnings(195000);
+        throw new Error('No data in result');
       }
-
-      setTotalJobs(jobs.length > 0 ? jobs.length : 2);
-
-      // 2. Optional: Try to fetch real database summary from API
+    } catch (err) {
+      console.log('Failed to fetch from API, falling back to local storage:', err);
       try {
-        const response = await api.get('/api/drivers/me/earnings/summary');
-        if (response.data && response.data.result) {
-          const apiEarnings = response.data.result.totalEarnings || 0;
-          if (apiEarnings > 0) {
-            setEarnings(apiEarnings);
-          }
-        }
-      } catch (err) {
-        console.log('Using local pre-seeded earnings details (expected behavior when mock database is empty)');
+        const storedEarnings = await AsyncStorage.getItem('driver_earnings');
+        const storedJobsJson = await AsyncStorage.getItem('driver_completed_jobs');
+        
+        const jobs = storedJobsJson ? JSON.parse(storedJobsJson) : [];
+        const localEarnings = storedEarnings ? parseFloat(storedEarnings) : 195000;
+        
+        setEarnings(localEarnings);
+        setTotalDriverAmount(localEarnings);
+        setTotalGrossAmount(Math.round(localEarnings / 0.7));
+        setTotalCompletedRides(jobs.length > 0 ? jobs.length : 2);
+        setAverageRating(4.9);
+      } catch (storageErr) {
+        console.log('Failed to load from storage:', storageErr);
       }
-
-    } catch (e) {
-      console.log('Failed to load earnings summary:', e);
     } finally {
       setLoading(false);
     }
@@ -111,14 +112,32 @@ export default function DriverEarningsScreen() {
         </View>
 
         {/* Performance Statistics Grid */}
-        <Text style={styles.sectionTitle}>Chỉ số hiệu suất</Text>
+        <Text style={styles.sectionTitle}>Báo cáo chi tiết</Text>
+        <View style={styles.statsGrid}>
+          <View style={styles.statCard}>
+            <View style={[styles.statIconCircle, { backgroundColor: '#E0F2FE' }]}>
+              <TrendingUp size={18} color="#0284C7" />
+            </View>
+            <Text style={styles.statSub}>Tổng tiền khách trả</Text>
+            <Text style={styles.statMain}>{totalGrossAmount.toLocaleString()}đ</Text>
+          </View>
+
+          <View style={styles.statCard}>
+            <View style={[styles.statIconCircle, { backgroundColor: '#ECFDF5' }]}>
+              <Wallet size={18} color="#10B981" />
+            </View>
+            <Text style={styles.statSub}>Doanh thu thực nhận</Text>
+            <Text style={styles.statMain}>{totalDriverAmount.toLocaleString()}đ</Text>
+          </View>
+        </View>
+
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
             <View style={[styles.statIconCircle, { backgroundColor: '#EEF2F6' }]}>
               <TrendingUp size={18} color="#6366F1" />
             </View>
-            <Text style={styles.statSub}>Tổng chuyến</Text>
-            <Text style={styles.statMain}>{totalJobs} cuốc</Text>
+            <Text style={styles.statSub}>Tổng chuyến đi</Text>
+            <Text style={styles.statMain}>{totalCompletedRides} cuốc</Text>
           </View>
 
           <View style={styles.statCard}>
@@ -126,37 +145,29 @@ export default function DriverEarningsScreen() {
               <Award size={18} color="#D97706" />
             </View>
             <Text style={styles.statSub}>Đánh giá sao</Text>
-            <Text style={styles.statMain}>4.9 ★</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <View style={[styles.statIconCircle, { backgroundColor: '#ECFDF5' }]}>
-              <Percent size={18} color="#10B981" />
-            </View>
-            <Text style={styles.statSub}>Tỷ lệ nhận cuốc</Text>
-            <Text style={styles.statMain}>98.5%</Text>
+            <Text style={styles.statMain}>{averageRating} ★</Text>
           </View>
         </View>
 
         {/* Weekly Chart Simulation */}
-        <Text style={styles.sectionTitle}>Thu nhập tuần này</Text>
+        <Text style={styles.sectionTitle}>Doanh thu tuần này</Text>
         <View style={styles.chartCard}>
           <View style={styles.chartHeader}>
             <Text style={styles.chartTotalLabel}>Tổng tuần:</Text>
-            <Text style={styles.chartTotalVal}>{earnings.toLocaleString()}đ</Text>
+            <Text style={styles.chartTotalVal}>{totalDriverAmount.toLocaleString()}đ</Text>
           </View>
 
           {/* Bar Chart Visualization */}
           <View style={styles.barsContainer}>
             <View style={styles.barCol}>
-              <Text style={styles.barPriceText}>{earnings > 150000 ? '150k' : '0'}</Text>
-              <View style={[styles.barShape, { height: 100, backgroundColor: '#C7D2FE' }]} />
+              <Text style={styles.barPriceText}>{totalDriverAmount > 150000 ? '150k' : '0đ'}</Text>
+              <View style={[styles.barShape, { height: totalDriverAmount > 150000 ? 100 : 5, backgroundColor: totalDriverAmount > 150000 ? '#C7D2FE' : '#E5E7EB' }]} />
               <Text style={styles.barLabel}>T2</Text>
             </View>
 
             <View style={styles.barCol}>
-              <Text style={styles.barPriceText}>{(earnings - 150000) > 0 ? `${((earnings - 150000)/1000).toFixed(0)}k` : '45k'}</Text>
-              <View style={[styles.barShape, { height: 60, backgroundColor: '#6366F1' }]} />
+              <Text style={styles.barPriceText}>{(totalDriverAmount - 150000) > 0 ? `${((totalDriverAmount - 150000)/1000).toFixed(0)}k` : (totalDriverAmount > 0 ? `${(totalDriverAmount/1000).toFixed(0)}k` : '0đ')}</Text>
+              <View style={[styles.barShape, { height: totalDriverAmount > 0 ? (totalDriverAmount > 150000 ? 60 : 100) : 5, backgroundColor: '#6366F1' }]} />
               <Text style={styles.barLabel}>T3</Text>
             </View>
 
@@ -284,7 +295,7 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     gap: 10,
-    marginBottom: 24,
+    marginBottom: 10,
   },
   statCard: {
     flex: 1,
@@ -370,6 +381,7 @@ const styles = StyleSheet.create({
   secureBadgeRow: {
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 14,
   },
   secureText: {
     fontSize: 12,
