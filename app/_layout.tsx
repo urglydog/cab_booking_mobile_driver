@@ -52,6 +52,11 @@ export default function RootLayout() {
         setHasToken(false);
         router.replace('/(auth)/login');
       }
+      return;
+    }
+
+    if (!hasToken && segments[0] !== '(auth)') {
+      router.replace('/(auth)/login');
     }
   }, [hasToken, isReady, segments, userRole]);
 
