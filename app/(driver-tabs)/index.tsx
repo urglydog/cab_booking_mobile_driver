@@ -28,6 +28,19 @@ const inferTripState = (payload: any) => {
   return undefined;
 };
 
+const calculateHaversineDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; // Distance in km
+  return d;
+};
+
 // Pre-seeded high-fidelity route coordinates from Gò Vấp (IUH) to District 1 (Notre Dame Cathedral)
 const routeCoordinates = [
   { latitude: 10.8220, longitude: 106.6870 }, // 1. 12 Nguyễn Văn Bảo (IUH Entrance)
@@ -102,6 +115,18 @@ export default function DriverHomeScreen() {
           // Backend states: PENDING_DRIVER | ASSIGNED | EN_ROUTE_PICKUP | IN_PROGRESS | COMPLETED / FINISHED
           const backendStatus = String(ride.rideStatus ?? '').toUpperCase();
           
+          let distanceVal = 1.5;
+          if (ride.pickupLocation?.lat && ride.pickupLocation?.lng && ride.destinationLocation?.lat && ride.destinationLocation?.lng) {
+            const rawDist = calculateHaversineDistance(
+              parseFloat(ride.pickupLocation.lat),
+              parseFloat(ride.pickupLocation.lng),
+              parseFloat(ride.destinationLocation.lat),
+              parseFloat(ride.destinationLocation.lng)
+            );
+            distanceVal = rawDist * 1.25; // 25% adjustment for road curves
+          }
+          const durationVal = Math.max(3, Math.round(distanceVal * 2.5 + 1));
+
           const mappedTrip = {
             id: activeRideId,
             customerName: ride.customerName || 'Khách hàng',
@@ -110,8 +135,8 @@ export default function DriverHomeScreen() {
             dropoffLocation: ride.destinationAddress || 'Điểm trả khách',
             estimatedFare: ride.estimatedFare || ride.fareAmount || 35000,
             paymentMethod: ride.paymentMethod || 'CASH',
-            distance: ride.distanceKm ? `${ride.distanceKm.toFixed(1)} km` : '1.5 km',
-            time: ride.durationMinutes ? `${ride.durationMinutes} phút` : '5 phút',
+            distance: `${distanceVal.toFixed(1)} km`,
+            time: `${durationVal} phút`,
           };
           
           setCurrentTrip(mappedTrip);
