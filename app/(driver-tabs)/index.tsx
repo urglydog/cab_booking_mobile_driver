@@ -499,7 +499,9 @@ export default function DriverHomeScreen() {
                     </View>
                     <View style={styles.statBox}>
                       <Text style={styles.statLabel}>Thanh toán</Text>
-                      <Text style={styles.statValue}>Tiền mặt</Text>
+                      <Text style={styles.statValue}>
+                        {currentTrip.paymentMethod === 'CASH' ? 'Tiền mặt' : 'Thẻ'}
+                      </Text>
                     </View>
                   </View>
 
