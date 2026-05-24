@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, FlatList, ActivityIndicator, RefreshControl } from 'react-native';
+import { StyleSheet, View, Text, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ClipboardList, Navigation2, Calendar, DollarSign, History } from 'lucide-react-native';
+import { useRouter } from 'expo-router';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function DriverJobsScreen() {
+  const router = useRouter();
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -89,7 +91,11 @@ export default function DriverJobsScreen() {
   };
 
   const renderItem = ({ item }: { item: any }) => (
-    <View style={styles.jobItem}>
+    <TouchableOpacity
+      style={styles.jobItem}
+      activeOpacity={0.7}
+      onPress={() => router.push({ pathname: '/detail', params: { bookingId: item.id } })}
+    >
       <View style={styles.jobHeader}>
         <View style={styles.customerBox}>
           <Text style={styles.customerLabel}>Khách hàng:</Text>
@@ -123,7 +129,7 @@ export default function DriverJobsScreen() {
           <Text style={styles.completedText}>Thành công</Text>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
