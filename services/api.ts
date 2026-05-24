@@ -2,10 +2,26 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const IP_ADDRESS = process.env.EXPO_PUBLIC_IP_ADDRESS || '192.168.1.57';
-export const GATEWAY_URL = process.env.EXPO_PUBLIC_GATEWAY_URL || `http://${IP_ADDRESS}:8080`;
-export const BOOKING_SERVICE_URL = process.env.EXPO_PUBLIC_BOOKING_SERVICE_URL || `http://${IP_ADDRESS}:8084`;
-export const AUTH_SERVICE_URL = process.env.EXPO_PUBLIC_AUTH_SERVICE_URL || `http://${IP_ADDRESS}:8081`;
-export const NOTIFICATION_SERVICE_URL = process.env.EXPO_PUBLIC_NOTIFICATION_SERVICE_URL || `http://${IP_ADDRESS}:8092`;
+export const GATEWAY_PORT = process.env.EXPO_PUBLIC_GATEWAY_PORT || '8080';
+
+// Kiểm tra xem IP_ADDRESS có phải là domain tunnel công khai hay không (ví dụ: ngrok, localtunnel, cloudflare)
+const isTunnel = IP_ADDRESS.startsWith('http') || (IP_ADDRESS.includes('.') && !/^\d+(\.\d+){3}$/.test(IP_ADDRESS));
+
+export const GATEWAY_URL = isTunnel
+  ? (IP_ADDRESS.startsWith('http') ? IP_ADDRESS : `https://${IP_ADDRESS}`)
+  : `http://${IP_ADDRESS}:${GATEWAY_PORT}`;
+
+export const BOOKING_SERVICE_URL = GATEWAY_URL;
+export const AUTH_SERVICE_URL = GATEWAY_URL;
+export const NOTIFICATION_SERVICE_URL = GATEWAY_URL;
+
+export const SOCKET_URL = isTunnel
+  ? (IP_ADDRESS.startsWith('https')
+      ? IP_ADDRESS.replace('https', 'wss')
+      : IP_ADDRESS.startsWith('http')
+        ? IP_ADDRESS.replace('http', 'ws')
+        : `wss://${IP_ADDRESS}`)
+  : `http://${IP_ADDRESS}:${GATEWAY_PORT}`;
 
 const api = axios.create({
   baseURL: GATEWAY_URL, // Default to Gateway
