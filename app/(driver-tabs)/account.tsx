@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { User, LogOut, Shield, PhoneCall, CreditCard, ChevronRight, Car, AlertTriangle, CheckCircle2 } from 'lucide-react-native';
+import { User, LogOut, Shield, PhoneCall, CreditCard, ChevronRight, Car, Bike, AlertTriangle, CheckCircle2 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import api from '@/services/api';
@@ -14,22 +14,114 @@ export default function DriverAccountScreen() {
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
   const [loadingVerify, setLoadingVerify] = useState(false);
 
+  const handleVerifyKYC = async (vehicleType: 'BIKE' | 'CAR4' | 'CAR7') => {
+    setLoadingVerify(true);
+    try {
+      let vehiclePlate = '51H-12345';
+      let vehicleModel = 'Toyota Vios';
+      let vehicleColor = 'Black';
+      if (vehicleType === 'BIKE') {
+        vehiclePlate = '59A-12345';
+        vehicleModel = 'Honda SH';
+        vehicleColor = 'Red';
+      } else if (vehicleType === 'CAR7') {
+        vehiclePlate = '51A-77777';
+        vehicleModel = 'Mitsubishi Xpander';
+        vehicleColor = 'Silver';
+      }
+
+      const freshName = await AsyncStorage.getItem('user_name') || driverName;
+      const freshPhone = await AsyncStorage.getItem('user_phone') || driverPhone;
+      const freshEmail = await AsyncStorage.getItem('user_email') || undefined;
+
+      // Call PUT /api/drivers/me/profile to auto-approve the driver profile on backend dev environment
+      const res = await api.put('/api/drivers/me/profile', {
+        fullName: freshName,
+        email: freshEmail,
+        phoneNumber: freshPhone,
+        avatarUrl: 'https://example.com/avatar/default.png',
+        licenseNumber: 'GPLX-999999',
+        vehicleType: vehicleType,
+        vehiclePlate: vehiclePlate,
+        vehicleModel: vehicleModel,
+        vehicleColor: vehicleColor,
+        serviceArea: 'Ho Chi Minh City'
+      });
+
+      if (res.status === 200 || res.status === 201) {
+        Alert.alert(
+          'Thành công 🎉',
+          `Xác thực và kích hoạt xe ${vehicleType === 'BIKE' ? 'Xe máy (BIKE)' : vehicleType === 'CAR4' ? 'Xe 4 chỗ (CAR4)' : 'Xe 7 chỗ (CAR7)'} thành công! Trạng thái của bạn đã chuyển sang APPROVED.\n\nBây giờ bạn có thể quay lại trang chủ và gạt nút ONLINE!`
+        );
+        // Refresh local UI state
+        if (res.data && res.data.result) {
+          const profile = res.data.result;
+          setDriverName(profile.fullName || freshName);
+          if (profile.phoneNumber) setDriverPhone(profile.phoneNumber);
+          if (profile.verificationStatus) {
+            setVerificationStatus(profile.verificationStatus);
+          }
+          if (profile.vehiclePlate) {
+            let typeLabel = 'Xe 4 chỗ';
+            if (profile.vehicleType === 'BIKE') typeLabel = 'Xe máy';
+            else if (profile.vehicleType === 'CAR7') typeLabel = 'Xe 7 chỗ';
+            setVehicleInfo(`${typeLabel} • ${profile.vehiclePlate} (${profile.vehicleModel})`);
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error(e);
+      const msg = e.response?.data?.message || 'Không thể kết nối đến máy chủ xác thực.';
+      Alert.alert('Thất bại', msg);
+    } finally {
+      setLoadingVerify(false);
+    }
+  };
+
   const loadProfile = async () => {
     try {
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token) {
+        console.log('No access token found, skipping profile load.');
+        return;
+      }
+
       const name = await AsyncStorage.getItem('user_name');
       if (name) setDriverName(name);
 
+      const phone = await AsyncStorage.getItem('user_phone');
+      if (phone) setDriverPhone(phone);
+
       // Attempt to fetch profile details from driver-service
-      const res = await api.get('/api/drivers/me/profile');
-      if (res.data && res.data.result) {
-        const profile = res.data.result;
-        setDriverName(profile.fullName || name);
-        if (profile.phoneNumber) setDriverPhone(profile.phoneNumber);
-        if (profile.verificationStatus) {
-          setVerificationStatus(profile.verificationStatus);
+      let profileFetched = false;
+      try {
+        const res = await api.get('/api/drivers/me/profile');
+        if (res.data && res.data.result) {
+          profileFetched = true;
+          const profile = res.data.result;
+          setDriverName(profile.fullName || name);
+          if (profile.phoneNumber) setDriverPhone(profile.phoneNumber);
+          if (profile.verificationStatus) {
+            setVerificationStatus(profile.verificationStatus);
+          }
+          if (profile.vehiclePlate) {
+            let typeLabel = 'Xe 4 chỗ';
+            if (profile.vehicleType === 'BIKE') typeLabel = 'Xe máy';
+            else if (profile.vehicleType === 'CAR7') typeLabel = 'Xe 7 chỗ';
+            setVehicleInfo(`${typeLabel} • ${profile.vehiclePlate} (${profile.vehicleModel})`);
+          }
         }
-        if (profile.vehiclePlate) {
-          setVehicleInfo(`${profile.vehicleType === 'BIKE' ? 'Xe máy' : 'Xe ô tô'} • ${profile.vehiclePlate} (${profile.vehicleModel})`);
+      } catch (profileErr) {
+        console.log('Profile get request failed (likely not created yet on server):', profileErr);
+      }
+
+      if (!profileFetched) {
+        // Auto-check for pending registration vehicle type
+        const pendingType = await AsyncStorage.getItem('@pending_registration_vehicle_type');
+        if (pendingType) {
+          await AsyncStorage.removeItem('@pending_registration_vehicle_type');
+          // Auto-trigger KYC verification!
+          await handleVerifyKYC(pendingType as any);
         }
       }
     } catch (err) {
@@ -41,37 +133,29 @@ export default function DriverAccountScreen() {
     loadProfile();
   }, []);
 
-  const handleVerifyKYC = async () => {
-    setLoadingVerify(true);
-    try {
-      // Call PUT /api/drivers/me/profile to auto-approve the driver profile on backend dev environment
-      const res = await api.put('/api/drivers/me/profile', {
-        fullName: driverName,
-        phoneNumber: driverPhone,
-        avatarUrl: 'https://example.com/avatar/default.png',
-        licenseNumber: 'GPLX-999999',
-        vehicleType: 'CAR4',
-        vehiclePlate: '51H-12345',
-        vehicleModel: 'Toyota Vios',
-        vehicleColor: 'Black',
-        serviceArea: 'Ho Chi Minh City'
-      });
-
-      if (res.status === 200 || res.status === 201) {
-        Alert.alert(
-          'Thành công 🎉',
-          'Xác thực tài khoản Đối tác thành công! Trạng thái của bạn đã được chuyển sang APPROVED.\n\nBây giờ bạn có thể quay lại trang chủ và gạt nút ONLINE!'
-        );
-        // Refresh local UI state
-        await loadProfile();
-      }
-    } catch (e: any) {
-      console.error(e);
-      const msg = e.response?.data?.message || 'Không thể kết nối đến máy chủ xác thực.';
-      Alert.alert('Thất bại', msg);
-    } finally {
-      setLoadingVerify(false);
-    }
+  const handleVerifyPrompt = () => {
+    Alert.alert(
+      'Đăng ký / Kích hoạt xe',
+      'Vui lòng chọn loại xe bạn muốn đăng ký hoạt động với CAB:',
+      [
+        {
+          text: '🏍️ Xe máy (BIKE)',
+          onPress: () => handleVerifyKYC('BIKE')
+        },
+        {
+          text: '🚗 Ô tô 4 chỗ (CAR4)',
+          onPress: () => handleVerifyKYC('CAR4')
+        },
+        {
+          text: '🚐 Ô tô 7 chỗ (CAR7)',
+          onPress: () => handleVerifyKYC('CAR7')
+        },
+        {
+          text: 'Hủy bỏ',
+          style: 'cancel'
+        }
+      ]
+    );
   };
 
   const handleLogout = async () => {
@@ -136,7 +220,7 @@ export default function DriverAccountScreen() {
             </Text>
             <TouchableOpacity 
               style={[styles.verifyKycButton, loadingVerify && { opacity: 0.7 }]} 
-              onPress={handleVerifyKYC}
+              onPress={handleVerifyPrompt}
               disabled={loadingVerify}
             >
               {loadingVerify ? (
@@ -155,6 +239,11 @@ export default function DriverAccountScreen() {
             <Text style={styles.approvedKycDesc}>
               Hồ sơ của bạn đã được kiểm duyệt và phê duyệt thành công (verificationStatus = APPROVED). Bạn đã đủ điều kiện gạt nút ONLINE để đón khách.
             </Text>
+            <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#A7F3D0' }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: '#047857', letterSpacing: 0.5 }}>
+                🟢 DỊCH VỤ HOẠT ĐỘNG: {vehicleInfo.split(' • ')[0]?.toUpperCase()}
+              </Text>
+            </View>
           </View>
         )}
 
@@ -162,7 +251,11 @@ export default function DriverAccountScreen() {
         <Text style={styles.sectionTitle} style={{ marginTop: 16 }}>Phương tiện đăng ký</Text>
         <View style={styles.vehicleCard}>
           <View style={styles.vehicleIconCircle}>
-            <Car size={20} color="#6366F1" />
+            {vehicleInfo.includes('Xe máy') ? (
+              <Bike size={20} color="#6366F1" />
+            ) : (
+              <Car size={20} color="#6366F1" />
+            )}
           </View>
           <View style={styles.vehicleMeta}>
             <Text style={styles.vehicleLabel}>Thông tin xe</Text>
@@ -173,7 +266,7 @@ export default function DriverAccountScreen() {
         {/* Menu Items */}
         <Text style={styles.sectionTitle}>Cài đặt tài khoản</Text>
         <View style={styles.menuContainer}>
-          <TouchableOpacity style={styles.menuItem} onPress={handleVerifyKYC}>
+          <TouchableOpacity style={styles.menuItem} onPress={handleVerifyPrompt}>
             <View style={styles.menuItemLeft}>
               <User size={18} color="#4B5563" />
               <Text style={styles.menuItemText}>Hồ sơ cá nhân & Xác thực</Text>

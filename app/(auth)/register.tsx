@@ -11,8 +11,10 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [role, setRole] = useState<'USER' | 'DRIVER'>('DRIVER');
+  const [vehicleType, setVehicleType] = useState<'BIKE' | 'CAR4' | 'CAR7'>('BIKE');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const AsyncStorage = require('@react-native-async-storage/async-storage').default;
 
   const handleRegister = async () => {
     if (!fullName || !email || !password || !phoneNumber) {
@@ -34,6 +36,9 @@ export default function RegisterScreen() {
       }, { baseURL: GATEWAY_URL }); // Go via API Gateway
 
       if (response.status === 200 || response.status === 201) {
+        // Save the chosen vehicle type for the auto-activation flow
+        await AsyncStorage.setItem('@pending_registration_vehicle_type', vehicleType);
+
         Alert.alert('Thành công', 'Đăng ký tài khoản thành công! Vui lòng đăng nhập.', [
           { text: 'OK', onPress: () => router.push('/login') }
         ]);
@@ -99,7 +104,31 @@ export default function RegisterScreen() {
             />
           </View>
 
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Chọn loại phương tiện hoạt động</Text>
+            <View style={styles.roleSelectorRow}>
+              <TouchableOpacity 
+                style={[styles.roleSelectButton, vehicleType === 'BIKE' && styles.roleActiveButton]}
+                onPress={() => setVehicleType('BIKE')}
+              >
+                <Text style={[styles.roleSelectText, vehicleType === 'BIKE' && styles.roleActiveText]}>🏍️ Xe máy</Text>
+              </TouchableOpacity>
 
+              <TouchableOpacity 
+                style={[styles.roleSelectButton, vehicleType === 'CAR4' && styles.roleActiveButton]}
+                onPress={() => setVehicleType('CAR4')}
+              >
+                <Text style={[styles.roleSelectText, vehicleType === 'CAR4' && styles.roleActiveText]}>🚗 4 Chỗ</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={[styles.roleSelectButton, vehicleType === 'CAR7' && styles.roleActiveButton]}
+                onPress={() => setVehicleType('CAR7')}
+              >
+                <Text style={[styles.roleSelectText, vehicleType === 'CAR7' && styles.roleActiveText]}>🚐 7 Chỗ</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
 
           <TouchableOpacity 
             style={[styles.button, loading && styles.buttonDisabled]} 

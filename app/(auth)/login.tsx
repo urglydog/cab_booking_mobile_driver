@@ -34,6 +34,8 @@ export default function LoginScreen() {
       await AsyncStorage.setItem('user_id', user.userId);
       await AsyncStorage.setItem('user_name', user.fullName);
       await AsyncStorage.setItem('user_role', user.role || 'ROLE_USER');
+      await AsyncStorage.setItem('user_phone', user.phoneNumber || '');
+      await AsyncStorage.setItem('user_email', user.email || '');
 
       // Register device FCM token with Notification Service through API Gateway
       try {
