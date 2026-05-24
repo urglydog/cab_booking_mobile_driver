@@ -101,9 +101,6 @@ export default function DriverHomeScreen() {
           // Map backend states to UI states
           // Backend states: PENDING_DRIVER | ASSIGNED | EN_ROUTE_PICKUP | IN_PROGRESS | COMPLETED / FINISHED
           const backendStatus = String(ride.rideStatus ?? '').toUpperCase();
-          const estimatedFare = Number(ride.estimatedFare ?? ride.fareAmount ?? ride.currentRideEstimatedFare ?? 0) || null;
-          const distanceKm = ride.distanceKm != null ? Number(ride.distanceKm) : null;
-          const durationMinutes = ride.durationMinutes != null ? Number(ride.durationMinutes) : null;
           
           const mappedTrip = {
             id: activeRideId,
@@ -111,10 +108,10 @@ export default function DriverHomeScreen() {
             phone: ride.customerPhone || '0901234567',
             pickupLocation: ride.pickupAddress || 'Điểm đón khách',
             dropoffLocation: ride.destinationAddress || 'Điểm trả khách',
-            estimatedFare,
+            estimatedFare: ride.estimatedFare || ride.fareAmount || 35000,
             paymentMethod: ride.paymentMethod || 'CASH',
-            distance: distanceKm != null ? `${distanceKm.toFixed(1)} km` : 'Đang cập nhật',
-            time: durationMinutes != null ? `${durationMinutes} phút` : 'Đang cập nhật',
+            distance: ride.distanceKm ? `${ride.distanceKm.toFixed(1)} km` : '1.5 km',
+            time: ride.durationMinutes ? `${ride.durationMinutes} phút` : '5 phút',
           };
           
           setCurrentTrip(mappedTrip);
@@ -202,11 +199,30 @@ export default function DriverHomeScreen() {
   const toggleOnline = async (value: boolean) => {
     setLoading(true);
     try {
-      if (value && verificationStatus !== 'APPROVED') {
+      let currentStatus = verificationStatus;
+      
+      if (value) {
+        // Fetch the fresh profile from driver-service to check real status
+        try {
+          const res = await api.get('/api/drivers/me/profile');
+          if (res.data && res.data.result) {
+            const profile = res.data.result;
+            if (profile.verificationStatus) {
+              currentStatus = profile.verificationStatus;
+              setVerificationStatus(profile.verificationStatus);
+            }
+          }
+        } catch (profileErr) {
+          console.log('Failed to fetch fresh profile status, falling back to state:', profileErr);
+        }
+      }
+
+      if (value && currentStatus !== 'APPROVED') {
         Alert.alert(
           'Tài khoản chưa được duyệt',
           'Bạn cần vào tab Tài khoản và bấm Kích hoạt tài khoản để backend chuyển trạng thái sang APPROVED trước khi bật Online.'
         );
+        setLoading(false);
         return;
       }
 
@@ -288,11 +304,14 @@ export default function DriverHomeScreen() {
 
   const handleArriveAtPickup = async () => {
     try {
-      await api.patch('/api/drivers/me/rides/current', {
-        rideStatus: 'EN_ROUTE_PICKUP',
-        currentLatitude: 10.822,
-        currentLongitude: 106.687
-      });
+      await api.post(`/api/v1/rides/${currentTrip.id}/arrive`);
+      try {
+        await api.patch('/api/drivers/me/rides/current', {
+          rideStatus: 'ARRIVED_PICKUP'
+        });
+      } catch (err: any) {
+        console.log('Failed to patch driver status to ARRIVED_PICKUP:', err.message || err);
+      }
       setTripState('ARRIVED');
     } catch (e: any) {
       console.log('Failed to notify arrival on server:', e.message || e);
@@ -302,11 +321,14 @@ export default function DriverHomeScreen() {
 
   const handleStartTrip = async () => {
     try {
-      await api.patch('/api/drivers/me/rides/current', {
-        rideStatus: 'IN_PROGRESS',
-        currentLatitude: 10.822,
-        currentLongitude: 106.687
-      });
+      await api.post(`/api/v1/rides/${currentTrip.id}/start`);
+      try {
+        await api.patch('/api/drivers/me/rides/current', {
+          rideStatus: 'IN_PROGRESS'
+        });
+      } catch (err: any) {
+        console.log('Failed to patch driver status to IN_PROGRESS:', err.message || err);
+      }
       setTripState('IN_PROGRESS');
     } catch (e: any) {
       console.log('Failed to start trip on server:', e.message || e);
@@ -316,11 +338,15 @@ export default function DriverHomeScreen() {
 
   const handleCompleteTrip = async () => {
     try {
-      const distanceVal = parseFloat(currentTrip.distance) || 5.0;
-      await api.post('/api/drivers/me/rides/current/complete', {
-        fareAmount: currentTrip.estimatedFare,
-        distanceKm: distanceVal
+      await api.post(`/api/v1/rides/${currentTrip.id}/complete`, {
+        finalFare: currentTrip.estimatedFare,
+        paymentMethod: currentTrip.paymentMethod || 'CASH'
       });
+      try {
+        await api.post('/api/drivers/me/rides/current/complete');
+      } catch (err: any) {
+        console.log('Failed to post driver complete:', err.message || err);
+      }
     } catch (e: any) {
       console.log('Failed to complete trip on server:', e.message || e);
     }
@@ -339,10 +365,11 @@ export default function DriverHomeScreen() {
       };
       await AsyncStorage.setItem('driver_completed_jobs', JSON.stringify([newJob, ...jobs]));
 
-      // Update local driver earnings
+      // Update local driver earnings (70% driver share, 30% platform fee)
       const existingEarnings = await AsyncStorage.getItem('driver_earnings');
       const currentEarnings = existingEarnings ? parseFloat(existingEarnings) : 0;
-      await AsyncStorage.setItem('driver_earnings', (currentEarnings + currentTrip.estimatedFare).toString());
+      const driverEarning = currentTrip.estimatedFare * 0.70;
+      await AsyncStorage.setItem('driver_earnings', (currentEarnings + driverEarning).toString());
     } catch (storageError) {
       console.log('Failed to save simulated earnings:', storageError);
     }
@@ -454,9 +481,7 @@ export default function DriverHomeScreen() {
                   {/* Price Tag */}
                   <View style={styles.priceTagRow}>
                     <Text style={styles.priceTagLabel}>Bạn sẽ nhận được:</Text>
-                    <Text style={styles.priceTagValue}>
-                      {currentTrip.estimatedFare != null ? `${Number(currentTrip.estimatedFare).toLocaleString()}đ` : 'Đang cập nhật'}
-                    </Text>
+                    <Text style={styles.priceTagValue}>{currentTrip.estimatedFare?.toLocaleString()}đ</Text>
                   </View>
 
                   {/* Actions */}
@@ -528,9 +553,7 @@ export default function DriverHomeScreen() {
                 {/* Fare Summary and button */}
                 <View style={styles.activeFareRow}>
                   <Text style={styles.activeFareLabel}>Tổng cước:</Text>
-                  <Text style={styles.activeFareValue}>
-                    {currentTrip.estimatedFare != null ? `${Number(currentTrip.estimatedFare).toLocaleString()}đ` : 'Đang cập nhật'}
-                  </Text>
+                  <Text style={styles.activeFareValue}>{currentTrip.estimatedFare?.toLocaleString()}đ</Text>
                 </View>
 
                 <View style={styles.stepProgressContainer}>
@@ -567,10 +590,12 @@ export default function DriverHomeScreen() {
                 
                 <View style={styles.successSummaryBox}>
                   <View style={styles.successSummaryRow}>
-                    <Text style={styles.successSummaryLabel}>Cước thu được:</Text>
-                    <Text style={styles.successSummaryFare}>
-                      +{currentTrip.estimatedFare != null ? `${Number(currentTrip.estimatedFare).toLocaleString()}đ` : 'Đang cập nhật'}
-                    </Text>
+                    <Text style={styles.successSummaryLabel}>Tổng tiền khách trả:</Text>
+                    <Text style={styles.successSummaryValue}>{currentTrip.estimatedFare?.toLocaleString()}đ</Text>
+                  </View>
+                  <View style={styles.successSummaryRow}>
+                    <Text style={styles.successSummaryLabel}>Thu nhập của bạn (70%):</Text>
+                    <Text style={styles.successSummaryFare}>+{(currentTrip.estimatedFare * 0.70)?.toLocaleString()}đ</Text>
                   </View>
                   <View style={styles.successSummaryRow}>
                     <Text style={styles.successSummaryLabel}>Khách hàng:</Text>
