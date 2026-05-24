@@ -5,6 +5,28 @@ import { Navigation, MapPin, Play, CheckCircle2, Navigation2, Check, X, Shield, 
 import DriverMap from '@/components/DriverMap';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
+import { useSocket } from '@/hooks/useSocket';
+
+const isRoomUpdateForRide = (payload: any, rideId?: string) => {
+  if (!rideId) return true;
+  const roomId = payload?.userId || payload?.bookingId || payload?.rideId || '';
+  return roomId === rideId || roomId === `ROOM_${rideId}`;
+};
+
+const inferTripState = (payload: any) => {
+  const rawStatus = String(payload?.status ?? payload?.rideStatus ?? payload?.type ?? payload?.eventType ?? '').toUpperCase();
+  const title = String(payload?.title ?? '').toLowerCase();
+  const message = String(payload?.message ?? '').toLowerCase();
+
+  if (rawStatus === 'ASSIGNED' || title.includes('cuốc xe mới') || message.includes('nhận cuốc')) return 'PROPOSAL';
+  if (rawStatus === 'ACCEPTED') return 'ACCEPTED';
+  if (rawStatus === 'PICKUP' || rawStatus === 'ARRIVED' || rawStatus === 'EN_ROUTE_PICKUP' || title.includes('đến điểm đón') || message.includes('đã đến điểm đón')) return 'ARRIVED';
+  if (rawStatus === 'IN_PROGRESS' || rawStatus === 'STARTED' || title.includes('bắt đầu') || message.includes('bắt đầu')) return 'IN_PROGRESS';
+  if (rawStatus === 'COMPLETED' || rawStatus === 'FINISHED' || title.includes('hoàn thành') || message.includes('hoàn thành')) return 'COMPLETED_SUCCESS';
+  if (rawStatus === 'CANCELLED') return 'IDLE';
+  return undefined;
+};
 
 // Pre-seeded high-fidelity route coordinates from Gò Vấp (IUH) to District 1 (Notre Dame Cathedral)
 const routeCoordinates = [
@@ -19,9 +41,12 @@ const routeCoordinates = [
 ];
 
 export default function DriverHomeScreen() {
+  const router = useRouter();
+  const { socket } = useSocket();
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
   const [driverName, setDriverName] = useState('Tài xế');
+  const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
   
   // Trip Simulation State Machine
   // States: 'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'
@@ -39,7 +64,11 @@ export default function DriverHomeScreen() {
         // Attempt to fetch profile from driver-service to check real profile
         const res = await api.get('/api/drivers/me/profile');
         if (res.data && res.data.result) {
-          setDriverName(res.data.result.fullName || name);
+          const profile = res.data.result;
+          setDriverName(profile.fullName || name);
+          if (profile.verificationStatus) {
+            setVerificationStatus(profile.verificationStatus);
+          }
         }
       } catch (err) {
         console.log('Driver profile load from API failed (using local fallback name)');
@@ -59,47 +88,48 @@ export default function DriverHomeScreen() {
         const response = await api.get('/api/drivers/me/current-ride');
         if (response.data && response.data.result) {
           const ride = response.data.result;
+          const activeRideId = String(ride.rideId ?? ride.bookingId ?? '').trim();
           
+          if (!activeRideId) {
+            if (tripState !== 'IDLE' && tripState !== 'COMPLETED_SUCCESS') {
+              setTripState('IDLE');
+              setCurrentTrip(null);
+            }
+            return;
+          }
+
           // Map backend states to UI states
           // Backend states: PENDING_DRIVER | ASSIGNED | EN_ROUTE_PICKUP | IN_PROGRESS | COMPLETED / FINISHED
-          const backendStatus = ride.rideStatus;
+          const backendStatus = String(ride.rideStatus ?? '').toUpperCase();
+          const estimatedFare = Number(ride.estimatedFare ?? ride.fareAmount ?? ride.currentRideEstimatedFare ?? 0) || null;
+          const distanceKm = ride.distanceKm != null ? Number(ride.distanceKm) : null;
+          const durationMinutes = ride.durationMinutes != null ? Number(ride.durationMinutes) : null;
           
           const mappedTrip = {
-            id: ride.rideId,
+            id: activeRideId,
             customerName: ride.customerName || 'Khách hàng',
             phone: ride.customerPhone || '0901234567',
             pickupLocation: ride.pickupAddress || 'Điểm đón khách',
             dropoffLocation: ride.destinationAddress || 'Điểm trả khách',
-            estimatedFare: ride.fareAmount || 35000,
+            estimatedFare,
             paymentMethod: ride.paymentMethod || 'CASH',
-            distance: ride.distanceKm ? `${ride.distanceKm.toFixed(1)} km` : '1.5 km',
-            time: ride.durationMinutes ? `${ride.durationMinutes} phút` : '5 phút',
+            distance: distanceKm != null ? `${distanceKm.toFixed(1)} km` : 'Đang cập nhật',
+            time: durationMinutes != null ? `${durationMinutes} phút` : 'Đang cập nhật',
           };
           
           setCurrentTrip(mappedTrip);
 
           if (backendStatus === 'ASSIGNED') {
-            // Only show proposal card if we were IDLE
-            if (tripState === 'IDLE') {
-              setCountdown(15);
-              setTripState('PROPOSAL');
-            }
+            setCountdown(15);
+            setTripState('PROPOSAL');
           } else if (backendStatus === 'ACCEPTED') {
-            // Only move to ACCEPTED if currently IDLE or PROPOSAL — don't override ARRIVED
-            if (tripState === 'IDLE' || tripState === 'PROPOSAL') {
-              setTripState('ACCEPTED');
-            }
-          } else if (backendStatus === 'EN_ROUTE_PICKUP' || backendStatus === 'ARRIVED_PICKUP') {
-            // Driver has confirmed arrival — show "Start trip" button
-            if (tripState !== 'ARRIVED' && tripState !== 'IN_PROGRESS') {
-              setTripState('ARRIVED');
-            }
+            setTripState('ACCEPTED');
+          } else if (backendStatus === 'EN_ROUTE_PICKUP' || backendStatus === 'ARRIVED_PICKUP' || backendStatus === 'PICKUP') {
+            setTripState('ARRIVED');
           } else if (backendStatus === 'IN_PROGRESS') {
             setTripState('IN_PROGRESS');
           } else if (backendStatus === 'COMPLETED' || backendStatus === 'FINISHED') {
-            if (tripState !== 'COMPLETED_SUCCESS') {
-              setTripState('COMPLETED_SUCCESS');
-            }
+            setTripState('COMPLETED_SUCCESS');
           }
         } else {
           // No active ride, reset if we were in progress
@@ -127,6 +157,33 @@ export default function DriverHomeScreen() {
     };
   }, [isOnline, tripState]);
 
+  useEffect(() => {
+    if (!socket || !currentTrip?.id) return;
+
+    const handleRoomUpdate = (data: any) => {
+      if (!isRoomUpdateForRide(data, currentTrip.id)) return;
+
+      const inferredState = inferTripState(data);
+      if (!inferredState) return;
+
+      if (inferredState === 'IDLE') {
+        setTripState('IDLE');
+        setCurrentTrip(null);
+        return;
+      }
+
+      setTripState(inferredState as any);
+    };
+
+    socket.emit('join_room', currentTrip.id);
+    socket.on('new_notification', handleRoomUpdate);
+
+    return () => {
+      socket.off('new_notification', handleRoomUpdate);
+      socket.emit('leave_room', currentTrip.id);
+    };
+  }, [socket, currentTrip?.id]);
+
   // Proposal countdown timer
   useEffect(() => {
     let timer: any;
@@ -145,6 +202,14 @@ export default function DriverHomeScreen() {
   const toggleOnline = async (value: boolean) => {
     setLoading(true);
     try {
+      if (value && verificationStatus !== 'APPROVED') {
+        Alert.alert(
+          'Tài khoản chưa được duyệt',
+          'Bạn cần vào tab Tài khoản và bấm Kích hoạt tài khoản để backend chuyển trạng thái sang APPROVED trước khi bật Online.'
+        );
+        return;
+      }
+
       // Sync availability with backend driver-service matching Spring DTO
       await api.patch('/api/drivers/me/availability', {
         availabilityStatus: value ? 'ONLINE' : 'OFFLINE',
@@ -174,11 +239,21 @@ export default function DriverHomeScreen() {
         setTripState('IDLE');
       }
     } catch (error: any) {
-      console.log('Failed to sync availability with server, updating locally:', error.message || error);
-      setIsOnline(value);
-      if (!value) {
-        setTripState('IDLE');
+      console.log('Failed to sync availability with server:', error.message || error);
+      let errorMsg = 'Không thể cập nhật trạng thái hoạt động với máy chủ.';
+      if (error.response?.status === 403) {
+        errorMsg = 'Backend từ chối bật Online. Hãy kiểm tra lại hồ sơ tài xế đã được APPROVED và đã chọn đúng loại xe CAR4.';
       }
+      if (error.response?.data?.message) {
+        errorMsg = error.response.data.message;
+      } else if (error.message) {
+        errorMsg = error.message;
+      }
+      Alert.alert('Lỗi kết nối', errorMsg);
+      
+      // Revert the toggle state
+      setIsOnline(false);
+      setTripState('IDLE');
     } finally {
       setLoading(false);
     }
@@ -379,7 +454,9 @@ export default function DriverHomeScreen() {
                   {/* Price Tag */}
                   <View style={styles.priceTagRow}>
                     <Text style={styles.priceTagLabel}>Bạn sẽ nhận được:</Text>
-                    <Text style={styles.priceTagValue}>{currentTrip.estimatedFare?.toLocaleString()}đ</Text>
+                    <Text style={styles.priceTagValue}>
+                      {currentTrip.estimatedFare != null ? `${Number(currentTrip.estimatedFare).toLocaleString()}đ` : 'Đang cập nhật'}
+                    </Text>
                   </View>
 
                   {/* Actions */}
@@ -423,7 +500,16 @@ export default function DriverHomeScreen() {
                     <TouchableOpacity style={styles.contactCircle} onPress={() => Alert.alert('Gọi điện', 'Đang kết nối cuộc gọi...')}>
                       <Phone size={16} color="#6366F1" />
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.contactCircle} onPress={() => Alert.alert('Trò chuyện', 'Mở khung chat...')}>
+                    <TouchableOpacity style={styles.contactCircle} onPress={() => {
+                      if (!currentTrip?.id) return;
+                      router.push({
+                        pathname: '/(driver-tabs)/chat',
+                        params: {
+                          bookingId: currentTrip.id,
+                          customerName: currentTrip.customerName ?? 'Khách hàng',
+                        },
+                      });
+                    }}>
                       <MessageSquare size={16} color="#6366F1" />
                     </TouchableOpacity>
                   </View>
@@ -442,7 +528,9 @@ export default function DriverHomeScreen() {
                 {/* Fare Summary and button */}
                 <View style={styles.activeFareRow}>
                   <Text style={styles.activeFareLabel}>Tổng cước:</Text>
-                  <Text style={styles.activeFareValue}>{currentTrip.estimatedFare?.toLocaleString()}đ</Text>
+                  <Text style={styles.activeFareValue}>
+                    {currentTrip.estimatedFare != null ? `${Number(currentTrip.estimatedFare).toLocaleString()}đ` : 'Đang cập nhật'}
+                  </Text>
                 </View>
 
                 <View style={styles.stepProgressContainer}>
@@ -480,7 +568,9 @@ export default function DriverHomeScreen() {
                 <View style={styles.successSummaryBox}>
                   <View style={styles.successSummaryRow}>
                     <Text style={styles.successSummaryLabel}>Cước thu được:</Text>
-                    <Text style={styles.successSummaryFare}>+{currentTrip.estimatedFare?.toLocaleString()}đ</Text>
+                    <Text style={styles.successSummaryFare}>
+                      +{currentTrip.estimatedFare != null ? `${Number(currentTrip.estimatedFare).toLocaleString()}đ` : 'Đang cập nhật'}
+                    </Text>
                   </View>
                   <View style={styles.successSummaryRow}>
                     <Text style={styles.successSummaryLabel}>Khách hàng:</Text>
@@ -488,7 +578,13 @@ export default function DriverHomeScreen() {
                   </View>
                 </View>
 
-                <TouchableOpacity style={styles.successReturnButton} onPress={() => setTripState('IDLE')}>
+                <TouchableOpacity style={styles.successReturnButton} onPress={() => {
+                  if (currentTrip?.id && socket) {
+                    socket.emit('leave_room', currentTrip.id);
+                  }
+                  setCurrentTrip(null);
+                  setTripState('IDLE');
+                }}>
                   <Text style={styles.successReturnButtonText}>TIẾP TỤC NHẬN CUỐC</Text>
                 </TouchableOpacity>
               </View>
