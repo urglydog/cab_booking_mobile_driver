@@ -7,5 +7,5 @@ export const getDriverProfile = async () => {
 
 export const updateDriverProfile = async (profileData: any) => {
   const response = await api.put('/api/drivers/me/profile', profileData);
-  return response.data;
+  return response.data.result;
 };
