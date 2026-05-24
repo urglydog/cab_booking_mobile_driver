@@ -39,16 +39,17 @@ export default function LoginScreen() {
         ['user_phone', user.phoneNumber || ''],
         ['user_email', user.email || ''],
       ]);
-        try {
-          const mockFcmToken = 'mock-device-fcm-token-' + user.userId;
-          await AsyncStorage.setItem('fcm_token', mockFcmToken);
-          console.log('Successfully synchronized FCM Token:', mockFcmToken);
-        } catch (fcmError) {
-          console.warn('Failed to sync FCM Token with backend:', fcmError);
-        }
 
-        Alert.alert('Thành công', 'Đăng nhập thành công!');
-        router.replace('/(driver-tabs)');
+      try {
+        const mockFcmToken = 'mock-device-fcm-token-' + user.userId;
+        await AsyncStorage.setItem('fcm_token', mockFcmToken);
+        console.log('Successfully synchronized FCM Token:', mockFcmToken);
+      } catch (fcmError) {
+        console.warn('Failed to sync FCM Token with backend:', fcmError);
+      }
+
+      Alert.alert('Thành công', 'Đăng nhập thành công!');
+      router.replace('/(driver-tabs)');
     } catch (error: any) {
       console.error(error);
       const message = error.response?.data?.message || 'Login failed. Please check your credentials.';
@@ -87,16 +88,16 @@ export default function LoginScreen() {
           />
         </View>
 
-        <TouchableOpacity 
-          style={[styles.button, loading && styles.buttonDisabled]} 
+        <TouchableOpacity
+          style={[styles.button, loading && styles.buttonDisabled]}
           onPress={handleLogin}
           disabled={loading}
         >
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log In</Text>}
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.registerLink} 
+        <TouchableOpacity
+          style={styles.registerLink}
           onPress={() => router.push('/register')}
         >
           <Text style={styles.registerText}>Don't have an account? <Text style={styles.registerHighlight}>Register now</Text></Text>
