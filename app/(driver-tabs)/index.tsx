@@ -135,6 +135,7 @@ export default function DriverHomeScreen() {
             dropoffLocation: ride.destinationAddress || 'Điểm trả khách',
             estimatedFare: ride.estimatedFare || ride.fareAmount || 35000,
             paymentMethod: ride.paymentMethod || 'CASH',
+            vehicleType: ride.vehicleType || ride.vehicleTier || 'CAR4',
             distance: `${distanceVal.toFixed(1)} km`,
             time: `${durationVal} phút`,
           };
@@ -466,6 +467,13 @@ export default function DriverHomeScreen() {
                 </View>
 
                 <View style={styles.proposalDetails}>
+                  <View style={styles.passengerRow}>
+                    <Text style={styles.passengerLabel}>Dịch vụ:</Text>
+                    <Text style={[styles.passengerValue, { color: '#6366F1', fontWeight: '800' }]}>
+                      {currentTrip.vehicleType === 'BIKE' ? '🏍️ Xe máy (BIKE)' : currentTrip.vehicleType === 'CAR7' ? '🚐 Ô tô 7 chỗ (CAR7)' : '🚗 Ô tô 4 chỗ (CAR4)'}
+                    </Text>
+                  </View>
+
                   <View style={styles.passengerRow}>
                     <Text style={styles.passengerLabel}>Khách hàng:</Text>
                     <Text style={styles.passengerValue}>{currentTrip.customerName}</Text>

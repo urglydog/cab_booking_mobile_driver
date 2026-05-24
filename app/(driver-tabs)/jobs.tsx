@@ -18,29 +18,8 @@ export default function DriverJobsScreen() {
       const simulatedJobsJson = await AsyncStorage.getItem('driver_completed_jobs');
       let localJobs = simulatedJobsJson ? JSON.parse(simulatedJobsJson) : [];
 
-      // Seed 2 realistic historical completed rides if the list is completely empty
-      if (localJobs.length === 0) {
-        const seedRides = [
-          {
-            id: 'booking-seed-001',
-            customerName: 'Nguyễn Chí Thiện',
-            pickupLocation: 'Công viên Gia Định, Gò Vấp',
-            dropoffLocation: '12 Nguyễn Văn Bảo, Gò Vấp (IUH)',
-            estimatedFare: 45000,
-            createdAt: new Date(Date.now() - 3600000 * 2).toISOString(), // 2 hours ago
-          },
-          {
-            id: 'booking-seed-002',
-            customerName: 'Trần Quốc Bảo',
-            pickupLocation: 'Sân bay Tân Sơn Nhất, Tân Bình',
-            dropoffLocation: 'Landmark 81, Bình Thạnh',
-            estimatedFare: 150000,
-            createdAt: new Date(Date.now() - 3600000 * 24).toISOString(), // 1 day ago
-          }
-        ];
-        await AsyncStorage.setItem('driver_completed_jobs', JSON.stringify(seedRides));
-        localJobs = seedRides;
-      }
+      // Filter out hardcoded seed trips to show only actual completed rides
+      localJobs = localJobs.filter((job: any) => job && job.id && !job.id.startsWith('booking-seed-'));
 
       // 2. Optional: Try to fetch real database jobs from Postgres if available
       try {
