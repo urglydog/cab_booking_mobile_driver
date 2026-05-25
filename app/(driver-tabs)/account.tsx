@@ -357,7 +357,7 @@ export default function DriverAccountScreen() {
         {/* Menu Items */}
         <Text style={styles.sectionTitle}>Cài đặt tài khoản</Text>
         <View style={styles.menuContainer}>
-          <TouchableOpacity style={styles.menuItem} onPress={handleVerifyPrompt}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => Alert.alert('Thông báo', 'Tính năng Hồ sơ cá nhân & Xác thực đang được phát triển.')}>
             <View style={styles.menuItemLeft}>
               <User size={18} color="#4B5563" />
               <Text style={styles.menuItemText}>Hồ sơ cá nhân & Xác thực</Text>

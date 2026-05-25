@@ -1,14 +1,14 @@
 import React from 'react';
 import { StyleSheet, View, Text } from 'react-native';
-import { MapPin, Navigation } from 'lucide-react-native';
 
 interface DriverMapProps {
   currentTrip: any;
   tripState: string;
-  routeCoordinates: Array<{ latitude: number; longitude: number }>;
+  routeCoordinates: { latitude: number; longitude: number }[];
+  isOnline?: boolean;
 }
 
-export default function DriverMap({ currentTrip, tripState }: DriverMapProps) {
+export default function DriverMap({ currentTrip, tripState, isOnline = false }: DriverMapProps) {
   return (
     <View style={styles.webMapContainer}>
       {/* Dynamic Visual SVG Grid Mock Map */}
@@ -44,8 +44,14 @@ export default function DriverMap({ currentTrip, tripState }: DriverMapProps) {
           />
         )}
 
-        {/* Pulsing Active Circle at Driver position */}
-        <circle cx="280" cy="180" r="25" fill="#6366F1" opacity="0.15" />
+        {/* Radar Active Circle at Driver position */}
+        {isOnline && (
+          <>
+            <circle cx="280" cy="180" r="44" fill="#6366F1" opacity="0.08" />
+            <circle cx="280" cy="180" r="28" fill="none" stroke="#6366F1" strokeWidth="2" opacity="0.28" />
+            <line x1="280" y1="180" x2="280" y2="136" stroke="#6366F1" strokeWidth="3" opacity="0.55" />
+          </>
+        )}
         <circle cx="280" cy="180" r="12" fill="#6366F1" opacity="0.4" />
         <circle cx="280" cy="180" r="6" fill="#6366F1" />
       </svg>

@@ -495,6 +495,7 @@ export default function DriverHomeScreen() {
               currentTrip={currentTrip}
               tripState={tripState}
               routeCoordinates={routeCoordinates}
+              isOnline={isOnline}
             />
 
             {/* Float Cards Over Map */}
