@@ -13,6 +13,16 @@ export default function DriverJobsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
+  const dedupeJobs = (items: any[]) => {
+    const seen = new Set<string>();
+    return items.filter((job: any) => {
+      const id = String(job?.id ?? '').trim();
+      if (!id || id.startsWith('booking-seed-') || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  };
+
   const fetchJobs = async () => {
     try {
       // 1. Attempt to fetch completed simulated jobs from AsyncStorage
@@ -20,7 +30,7 @@ export default function DriverJobsScreen() {
       let localJobs = simulatedJobsJson ? JSON.parse(simulatedJobsJson) : [];
 
       // Filter out hardcoded seed trips to show only actual completed rides
-      localJobs = localJobs.filter((job: any) => job && job.id && !job.id.startsWith('booking-seed-'));
+      localJobs = dedupeJobs(localJobs);
 
       // 2. Optional: Try to fetch real database jobs from Postgres if available
       try {
@@ -45,7 +55,7 @@ export default function DriverJobsScreen() {
                 combined.push(dbRide);
               }
             });
-            setJobs(combined);
+            setJobs(dedupeJobs(combined));
             setLoading(false);
             return;
           }
@@ -54,7 +64,7 @@ export default function DriverJobsScreen() {
         console.log('No real database rides found for this driver ID (normal fallback to local simulated jobs)');
       }
 
-      setJobs(localJobs);
+      setJobs(dedupeJobs(localJobs));
     } catch (error) {
       console.log('Failed to fetch jobs list:', error);
     } finally {
@@ -138,7 +148,7 @@ export default function DriverJobsScreen() {
       ) : (
         <FlatList
           data={jobs}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
           renderItem={renderItem}
           contentContainerStyle={styles.listContent}
           refreshControl={
