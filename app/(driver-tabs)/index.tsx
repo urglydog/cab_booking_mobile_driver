@@ -56,6 +56,18 @@ const routeCoordinates = [
 export default function DriverHomeScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const { socket } = useSocket();
+  const [isOnline, setIsOnline] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [driverName, setDriverName] = useState('Tài xế');
+  const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
+  
+  // Trip Simulation State Machine
+  // States: 'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'
+  const [tripState, setTripState] = useState<'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'>('IDLE');
+  const [countdown, setCountdown] = useState(15);
+  const [currentTrip, setCurrentTrip] = useState<any>(null);
+  const [completingTrip, setCompletingTrip] = useState(false);
 
   useEffect(() => {
     const isActiveTrip = tripState === 'ACCEPTED' || tripState === 'ARRIVED' || tripState === 'IN_PROGRESS';
@@ -79,17 +91,6 @@ export default function DriverHomeScreen() {
       console.log('Error modifying tab bar style:', e);
     }
   }, [tripState, navigation]);
-  const { socket } = useSocket();
-  const [isOnline, setIsOnline] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [driverName, setDriverName] = useState('Tài xế');
-  const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
-  
-  // Trip Simulation State Machine
-  // States: 'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'
-  const [tripState, setTripState] = useState<'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'>('IDLE');
-  const [countdown, setCountdown] = useState(15);
-  const [currentTrip, setCurrentTrip] = useState<any>(null);
 
   // Load Driver Name on mount
   useEffect(() => {
@@ -404,6 +405,8 @@ export default function DriverHomeScreen() {
   };
 
   const handleCompleteTrip = async () => {
+    if (completingTrip || !currentTrip?.id) return;
+    setCompletingTrip(true);
     try {
       await api.post(`/api/v1/rides/${currentTrip.id}/complete`, {
         finalFare: currentTrip.estimatedFare,
@@ -422,26 +425,35 @@ export default function DriverHomeScreen() {
     try {
       const existingJobsJson = await AsyncStorage.getItem('driver_completed_jobs');
       const jobs = existingJobsJson ? JSON.parse(existingJobsJson) : [];
+      const currentTripId = String(currentTrip.id);
       const newJob = {
-        id: currentTrip.id,
+        id: currentTripId,
         dropoffLocation: currentTrip.dropoffLocation,
         pickupLocation: currentTrip.pickupLocation,
         estimatedFare: currentTrip.estimatedFare,
         createdAt: new Date().toISOString(),
-        customerName: currentTrip.customerName
+        customerName: currentTrip.customerName,
+        status: 'COMPLETED',
+        paymentMethod: currentTrip.paymentMethod || 'CASH',
+        distance: currentTrip.distance
       };
-      await AsyncStorage.setItem('driver_completed_jobs', JSON.stringify([newJob, ...jobs]));
+      const jobsWithoutDuplicate = jobs.filter((job: any) => String(job?.id ?? '') !== currentTripId);
+      await AsyncStorage.setItem('driver_completed_jobs', JSON.stringify([newJob, ...jobsWithoutDuplicate]));
 
       // Update local driver earnings (70% driver share, 30% platform fee)
       const existingEarnings = await AsyncStorage.getItem('driver_earnings');
       const currentEarnings = existingEarnings ? parseFloat(existingEarnings) : 0;
       const driverEarning = currentTrip.estimatedFare * 0.70;
-      await AsyncStorage.setItem('driver_earnings', (currentEarnings + driverEarning).toString());
+      const alreadyStored = jobs.some((job: any) => String(job?.id ?? '') === currentTripId);
+      if (!alreadyStored) {
+        await AsyncStorage.setItem('driver_earnings', (currentEarnings + driverEarning).toString());
+      }
     } catch (storageError) {
       console.log('Failed to save simulated earnings:', storageError);
     }
 
     setTripState('COMPLETED_SUCCESS');
+    setCompletingTrip(false);
   };
 
   return (
@@ -648,9 +660,15 @@ export default function DriverHomeScreen() {
                   )}
 
                   {tripState === 'IN_PROGRESS' && (
-                    <TouchableOpacity style={[styles.progressButton, { backgroundColor: '#6366F1' }]} onPress={handleCompleteTrip}>
+                    <TouchableOpacity
+                      style={[styles.progressButton, { backgroundColor: '#6366F1', opacity: completingTrip ? 0.7 : 1 }]}
+                      onPress={handleCompleteTrip}
+                      disabled={completingTrip}
+                    >
                       <CheckCircle2 size={20} color="#FFF" />
-                      <Text style={styles.progressButtonText}>HOÀN THÀNH CHUYẾN ĐI</Text>
+                      <Text style={styles.progressButtonText}>
+                        {completingTrip ? 'ĐANG HOÀN THÀNH...' : 'HOÀN THÀNH CHUYẾN ĐI'}
+                      </Text>
                     </TouchableOpacity>
                   )}
                 </View>

@@ -32,17 +32,35 @@ export default function DriverEarningsScreen() {
     feedback: true,
   });
 
-  const [selectedDateIndex, setSelectedDateIndex] = useState(5); // Default to current day index in mock calendar
+  const [selectedDateIndex, setSelectedDateIndex] = useState(5);
 
-  // Mock Calendar Dates for visual display (matching Screenshot 3)
-  const mockCalendar = [
-    { dayName: 'Th 4', date: '20', isToday: false },
-    { dayName: 'Th 5', date: '21', isToday: false },
-    { dayName: 'Th 6', date: '22', isToday: false },
-    { dayName: 'Th 7', date: '23', isToday: false },
-    { dayName: 'CN', date: '24', isToday: false },
-    { dayName: 'Th 2', date: '25', isToday: true }, // Current active day
-  ];
+  const buildRecentCalendar = () => {
+    const labels = ['CN', 'Th 2', 'Th 3', 'Th 4', 'Th 5', 'Th 6', 'Th 7'];
+    const today = new Date();
+    return Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() - (5 - index));
+      return {
+        dayName: labels[date.getDay()],
+        date: String(date.getDate()).padStart(2, '0'),
+        month: date.getMonth(),
+        year: date.getFullYear(),
+        isToday: index === 5,
+      };
+    });
+  };
+
+  const calendar = buildRecentCalendar();
+
+  const dedupeJobs = (items: CompletedJob[]) => {
+    const seen = new Set<string>();
+    return items.filter((job) => {
+      const id = String(job?.id ?? '').trim();
+      if (!id || id.startsWith('booking-seed-') || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  };
 
   const fetchEarningsAndJobs = async () => {
     try {
@@ -52,8 +70,8 @@ export default function DriverEarningsScreen() {
       const storedJobsJson = await AsyncStorage.getItem('driver_completed_jobs');
       let localJobs: CompletedJob[] = storedJobsJson ? JSON.parse(storedJobsJson) : [];
 
-      // Filter out seed files
-      localJobs = localJobs.filter(j => j && j.id && !j.id.startsWith('booking-seed-'));
+      // Filter invalid, seeded, and duplicated local rides.
+      localJobs = dedupeJobs(localJobs);
 
       // 2. Fetch database rides from API as fallback/merge
       try {
@@ -87,6 +105,7 @@ export default function DriverEarningsScreen() {
       }
 
       // Sort by newest first
+      localJobs = dedupeJobs(localJobs);
       localJobs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
       // Ensure some mock items exist if empty so the user always has beautiful data to review (matching images)
@@ -248,12 +267,14 @@ export default function DriverEarningsScreen() {
   };
 
   const getFilteredJobs = () => {
-    const selectedDayStr = mockCalendar[selectedDateIndex].date; // '20', '21', '22', etc.
+    const selectedDay = calendar[selectedDateIndex];
     return jobs.filter(job => {
       try {
         const date = new Date(job.createdAt);
         const dayStr = String(date.getDate()).padStart(2, '0');
-        return dayStr === selectedDayStr;
+        return dayStr === selectedDay.date
+          && date.getMonth() === selectedDay.month
+          && date.getFullYear() === selectedDay.year;
       } catch (err) {
         return false;
       }
@@ -288,7 +309,7 @@ export default function DriverEarningsScreen() {
         {/* Horizontal Calendar Navigation (Ảnh 3) */}
         <View style={styles.calendarContainer}>
           <View style={styles.monthRow}>
-            <Text style={styles.monthText}>tháng 5</Text>
+            <Text style={styles.monthText}>tháng {calendar[selectedDateIndex].month + 1}</Text>
             <View style={styles.periodTabs}>
               <TouchableOpacity style={styles.periodTabActive}>
                 <Text style={styles.periodTabTextActive}>HẰNG NGÀY</Text>
@@ -300,7 +321,7 @@ export default function DriverEarningsScreen() {
           </View>
 
           <View style={styles.daysRow}>
-            {mockCalendar.map((item, index) => {
+            {calendar.map((item, index) => {
               const isSelected = selectedDateIndex === index;
               return (
                 <TouchableOpacity 
@@ -324,7 +345,9 @@ export default function DriverEarningsScreen() {
 
         {/* Large Net Earnings Display (Ảnh 1 / 2) */}
         <View style={styles.earningsDashboard}>
-          <Text style={styles.dashboardLabel}>Thu nhập ngày {mockCalendar[selectedDateIndex].date} thg 5</Text>
+          <Text style={styles.dashboardLabel}>
+            Thu nhập ngày {calendar[selectedDateIndex].date}/{calendar[selectedDateIndex].month + 1}
+          </Text>
           <Text style={styles.dashboardValue}>đ{Math.round(dailyNetEarnings).toLocaleString()}</Text>
           
           <View style={styles.walletBalanceRow}>
@@ -348,7 +371,7 @@ export default function DriverEarningsScreen() {
 
         {/* Completed Ride List (Ảnh 3) */}
         <View style={styles.jobsListContainer}>
-          {filteredJobs.map((item) => {
+          {filteredJobs.map((item, index) => {
             const isCancelled = item.status === 'CANCELLED';
             const rideNet = isCancelled ? 0 : Math.round(item.estimatedFare * 0.70);
             
@@ -366,7 +389,7 @@ export default function DriverEarningsScreen() {
 
             return (
               <TouchableOpacity 
-                key={item.id} 
+                key={`${item.id}-${index}`}
                 style={styles.jobItemRow}
                 activeOpacity={0.7}
                 onPress={() => setSelectedJob(item)}
@@ -571,7 +594,7 @@ export default function DriverEarningsScreen() {
                   <View style={styles.accordionBody}>
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLeftLabel}>Phí nền tảng CAB (30% Commission)</Text>
-                      <Text style={styles.detailRightVal} style={{ color: '#EF4444' }}>
+                      <Text style={[styles.detailRightVal, { color: '#EF4444' }]}>
                         -{Math.round(selectedJob.estimatedFare * 0.30).toLocaleString()}đ
                       </Text>
                     </View>

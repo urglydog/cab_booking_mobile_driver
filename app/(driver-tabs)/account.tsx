@@ -339,7 +339,7 @@ export default function DriverAccountScreen() {
         )}
 
         {/* Vehicle Information */}
-        <Text style={styles.sectionTitle} style={{ marginTop: 16 }}>Phương tiện đăng ký</Text>
+        <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Phương tiện đăng ký</Text>
         <View style={styles.vehicleCard}>
           <View style={styles.vehicleIconCircle}>
             {vehicleInfo.includes('Xe máy') ? (
