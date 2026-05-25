@@ -38,6 +38,7 @@ export default function RegisterScreen() {
       if (response.status === 200 || response.status === 201) {
         // Save the chosen vehicle type for the auto-activation flow
         await AsyncStorage.setItem('@pending_registration_vehicle_type', vehicleType);
+        await AsyncStorage.setItem('@pending_registration_email', email);
 
         Alert.alert('Thành công', 'Đăng ký tài khoản thành công! Vui lòng đăng nhập.', [
           { text: 'OK', onPress: () => router.push('/login') }

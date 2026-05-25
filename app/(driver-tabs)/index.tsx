@@ -5,7 +5,7 @@ import { Navigation, MapPin, Play, CheckCircle2, Navigation2, Check, X, Shield, 
 import DriverMap from '@/components/DriverMap';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
 
 const isRoomUpdateForRide = (payload: any, rideId?: string) => {
@@ -55,6 +55,30 @@ const routeCoordinates = [
 
 export default function DriverHomeScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const isActiveTrip = tripState === 'ACCEPTED' || tripState === 'ARRIVED' || tripState === 'IN_PROGRESS';
+    try {
+      if (isActiveTrip) {
+        navigation.getParent()?.setOptions({
+          tabBarStyle: { display: 'none' }
+        });
+      } else {
+        navigation.getParent()?.setOptions({
+          tabBarStyle: {
+            borderTopWidth: 1,
+            borderTopColor: '#E5E7EB',
+            height: 60,
+            paddingBottom: 10,
+            backgroundColor: '#FFF',
+          }
+        });
+      }
+    } catch (e) {
+      console.log('Error modifying tab bar style:', e);
+    }
+  }, [tripState, navigation]);
   const { socket } = useSocket();
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -127,10 +151,24 @@ export default function DriverHomeScreen() {
           }
           const durationVal = Math.max(3, Math.round(distanceVal * 2.5 + 1));
 
+          let customerName = 'Khách hàng';
+          let customerPhone = '0901234567';
+          try {
+            if (ride.customerId) {
+              const uRes = await api.get(`/api/users/${ride.customerId}/profile`);
+              if (uRes.data?.result) {
+                customerName = uRes.data.result.fullName || customerName;
+                customerPhone = uRes.data.result.phoneNumber || customerPhone;
+              }
+            }
+          } catch (e) {
+            console.log('Failed to fetch matched customer profile:', e);
+          }
+
           const mappedTrip = {
             id: activeRideId,
-            customerName: ride.customerName || 'Khách hàng',
-            phone: ride.customerPhone || '0901234567',
+            customerName: customerName,
+            phone: customerPhone,
             pickupLocation: ride.pickupAddress || 'Điểm đón khách',
             dropoffLocation: ride.destinationAddress || 'Điểm trả khách',
             estimatedFare: ride.estimatedFare || ride.fareAmount || 35000,
@@ -143,8 +181,11 @@ export default function DriverHomeScreen() {
           setCurrentTrip(mappedTrip);
 
           if (backendStatus === 'ASSIGNED') {
-            setCountdown(15);
-            setTripState('PROPOSAL');
+            if (tripState !== 'PROPOSAL') {
+              setCountdown(15);
+              setTripState('PROPOSAL');
+              router.replace('/(driver-tabs)');
+            }
           } else if (backendStatus === 'ACCEPTED') {
             setTripState('ACCEPTED');
           } else if (backendStatus === 'EN_ROUTE_PICKUP' || backendStatus === 'ARRIVED_PICKUP' || backendStatus === 'PICKUP') {
@@ -516,7 +557,7 @@ export default function DriverHomeScreen() {
                   {/* Price Tag */}
                   <View style={styles.priceTagRow}>
                     <Text style={styles.priceTagLabel}>Bạn sẽ nhận được:</Text>
-                    <Text style={styles.priceTagValue}>{currentTrip.estimatedFare?.toLocaleString()}đ</Text>
+                    <Text style={styles.priceTagValue}>{Math.round(currentTrip.estimatedFare * 0.70)?.toLocaleString()}đ</Text>
                   </View>
 
                   {/* Actions */}
@@ -587,8 +628,8 @@ export default function DriverHomeScreen() {
 
                 {/* Fare Summary and button */}
                 <View style={styles.activeFareRow}>
-                  <Text style={styles.activeFareLabel}>Tổng cước:</Text>
-                  <Text style={styles.activeFareValue}>{currentTrip.estimatedFare?.toLocaleString()}đ</Text>
+                  <Text style={styles.activeFareLabel}>Thu nhập thực nhận:</Text>
+                  <Text style={styles.activeFareValue}>{Math.round(currentTrip.estimatedFare * 0.70)?.toLocaleString()}đ</Text>
                 </View>
 
                 <View style={styles.stepProgressContainer}>

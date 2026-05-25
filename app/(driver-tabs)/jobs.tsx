@@ -5,6 +5,7 @@ import { ClipboardList, Navigation2, Calendar, DollarSign, History } from 'lucid
 import { useRouter } from 'expo-router';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from 'expo-router';
 
 export default function DriverJobsScreen() {
   const router = useRouter();
@@ -27,14 +28,16 @@ export default function DriverJobsScreen() {
         if (userId) {
           const response = await api.get(`/api/v1/bookings/driver/${userId}?page=0&size=20`);
           if (response.data && response.data.result && response.data.result.content) {
-            const dbRides = response.data.result.content.map((b: any) => ({
-              id: b.id,
-              customerName: b.customerId === userId ? 'Khách đặt qua App' : 'Khách hàng',
-              pickupLocation: b.pickupLocation,
-              dropoffLocation: b.dropoffLocation,
-              estimatedFare: b.estimatedFare,
-              createdAt: b.createdAt
-            }));
+            const dbRides = response.data.result.content
+              .filter((b: any) => b.status === 'COMPLETED' || b.status === 'CANCELLED')
+              .map((b: any) => ({
+                id: b.id,
+                customerName: b.customerId === userId ? 'Khách đặt qua App' : 'Khách hàng',
+                pickupLocation: b.pickupLocation,
+                dropoffLocation: b.dropoffLocation,
+                estimatedFare: b.estimatedFare,
+                createdAt: b.createdAt
+              }));
             // Merge database rides and local simulated rides, avoiding duplicates
             const combined = [...localJobs];
             dbRides.forEach((dbRide: any) => {
@@ -64,6 +67,12 @@ export default function DriverJobsScreen() {
     fetchJobs();
   }, []);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchJobs();
+    }, [])
+  );
+
   const onRefresh = () => {
     setRefreshing(true);
     fetchJobs();
@@ -80,7 +89,7 @@ export default function DriverJobsScreen() {
           <Text style={styles.customerLabel}>Khách hàng:</Text>
           <Text style={styles.customerName}>{item.customerName}</Text>
         </View>
-        <Text style={styles.fareAmount}>+{item.estimatedFare?.toLocaleString()}đ</Text>
+        <Text style={styles.fareAmount}>+{Math.round(item.estimatedFare * 0.70)?.toLocaleString()}đ</Text>
       </View>
 
       {/* Route Timeline */}

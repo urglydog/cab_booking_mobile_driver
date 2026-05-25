@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, ActivityIn
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { User, LogOut, Shield, PhoneCall, CreditCard, ChevronRight, Car, Bike, AlertTriangle, CheckCircle2 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import api from '@/services/api';
 
 export default function DriverAccountScreen() {
@@ -13,6 +13,48 @@ export default function DriverAccountScreen() {
   const [vehicleInfo, setVehicleInfo] = useState('Xe ô tô • 51H-12345 (Toyota Vios)');
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
   const [loadingVerify, setLoadingVerify] = useState(false);
+  const [stats, setStats] = useState({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
+
+  const fetchStats = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('user_id');
+      if (!userId) return;
+      
+      const response = await api.get(`/api/v1/bookings/driver/${userId}?page=0&size=100`);
+      if (response.data && response.data.result && response.data.result.content) {
+        const bookings = response.data.result.content;
+        const completed = bookings.filter((b: any) => b.status === 'COMPLETED').length;
+        const cancelled = bookings.filter((b: any) => b.status === 'CANCELLED').length;
+        const total = completed + cancelled;
+        
+        if (total > 0) {
+          const acceptRate = Math.round((completed / total) * 100);
+          const cancelRate = Math.round((cancelled / total) * 100);
+          setStats({ acceptRate, cancelRate, totalRides: total });
+        } else {
+          // If no database rides yet, try local completed jobs count as fallback
+          const localStored = await AsyncStorage.getItem('driver_completed_jobs');
+          if (localStored) {
+            const jobs = JSON.parse(localStored);
+            const comp = jobs.filter((j: any) => j.status !== 'CANCELLED').length;
+            const canc = jobs.filter((j: any) => j.status === 'CANCELLED').length;
+            const tot = comp + canc;
+            if (tot > 0) {
+              setStats({
+                acceptRate: Math.round((comp / tot) * 100),
+                cancelRate: Math.round((canc / tot) * 100),
+                totalRides: tot
+              });
+              return;
+            }
+          }
+          setStats({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
+        }
+      }
+    } catch (err) {
+      console.log('Failed to fetch driver stats:', err);
+    }
+  };
 
   const handleVerifyKYC = async (vehicleType: 'BIKE' | 'CAR4' | 'CAR7') => {
     setLoadingVerify(true);
@@ -119,7 +161,6 @@ export default function DriverAccountScreen() {
         // Auto-check for pending registration vehicle type
         const pendingType = await AsyncStorage.getItem('@pending_registration_vehicle_type');
         if (pendingType) {
-          await AsyncStorage.removeItem('@pending_registration_vehicle_type');
           // Auto-trigger KYC verification!
           await handleVerifyKYC(pendingType as any);
         }
@@ -131,31 +172,63 @@ export default function DriverAccountScreen() {
 
   useEffect(() => {
     loadProfile();
+    fetchStats();
   }, []);
 
-  const handleVerifyPrompt = () => {
-    Alert.alert(
-      'Đăng ký / Kích hoạt xe',
-      'Vui lòng chọn loại xe bạn muốn đăng ký hoạt động với CAB:',
-      [
-        {
-          text: '🏍️ Xe máy (BIKE)',
-          onPress: () => handleVerifyKYC('BIKE')
-        },
-        {
-          text: '🚗 Ô tô 4 chỗ (CAR4)',
-          onPress: () => handleVerifyKYC('CAR4')
-        },
-        {
-          text: '🚐 Ô tô 7 chỗ (CAR7)',
-          onPress: () => handleVerifyKYC('CAR7')
-        },
-        {
-          text: 'Hủy bỏ',
-          style: 'cancel'
-        }
-      ]
-    );
+  useFocusEffect(
+    React.useCallback(() => {
+      loadProfile();
+      fetchStats();
+    }, [])
+  );
+
+  const handleVerifyPrompt = async () => {
+    try {
+      const pendingType = await AsyncStorage.getItem('@pending_registration_vehicle_type');
+      if (pendingType === 'BIKE' || pendingType === 'CAR4' || pendingType === 'CAR7') {
+        const vehicleLabel = pendingType === 'BIKE' ? 'Xe máy (BIKE)' : pendingType === 'CAR4' ? 'Xe 4 chỗ (CAR4)' : 'Xe 7 chỗ (CAR7)';
+        Alert.alert(
+          'Kích hoạt phương tiện',
+          `Kích hoạt phương tiện ${vehicleLabel} bạn đã đăng ký hoạt động với CAB?`,
+          [
+            {
+              text: 'Hủy bỏ',
+              style: 'cancel'
+            },
+            {
+              text: 'XÁC NHẬN KÍCH HOẠT',
+              onPress: () => handleVerifyKYC(pendingType as any)
+            }
+          ]
+        );
+      } else {
+        // Fallback if not registered through standard flow
+        Alert.alert(
+          'Đăng ký / Kích hoạt xe',
+          'Vui lòng chọn loại xe bạn đăng ký hoạt động với CAB:',
+          [
+            {
+              text: '🏍️ Xe máy (BIKE)',
+              onPress: () => handleVerifyKYC('BIKE')
+            },
+            {
+              text: '🚗 Ô tô 4 chỗ (CAR4)',
+              onPress: () => handleVerifyKYC('CAR4')
+            },
+            {
+              text: '🚐 Ô tô 7 chỗ (CAR7)',
+              onPress: () => handleVerifyKYC('CAR7')
+            },
+            {
+              text: 'Hủy bỏ',
+              style: 'cancel'
+            }
+          ]
+        );
+      }
+    } catch (error) {
+      console.log('Failed to prompt activation:', error);
+    }
   };
 
   const handleLogout = async () => {
@@ -205,6 +278,24 @@ export default function DriverAccountScreen() {
           </View>
 
           <Text style={styles.driverPhoneText}>{driverPhone}</Text>
+
+          {/* Statistics Grid */}
+          <View style={styles.statsContainer}>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{stats.acceptRate}%</Text>
+              <Text style={styles.statLabel}>Tỉ lệ nhận</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{stats.cancelRate}%</Text>
+              <Text style={styles.statLabel}>Tỉ lệ hủy</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{stats.totalRides}</Text>
+              <Text style={styles.statLabel}>Tổng chuyến</Text>
+            </View>
+          </View>
         </View>
 
         {/* Verification / KYC Banner */}
@@ -376,6 +467,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6B7280',
     fontWeight: '500',
+  },
+  statsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  statBox: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1F2937',
+  },
+  statLabel: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  statDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#E5E7EB',
   },
   sectionTitle: {
     fontSize: 14,

@@ -12,6 +12,21 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  React.useEffect(() => {
+    const loadPendingEmail = async () => {
+      try {
+        const pendingEmail = await AsyncStorage.getItem('@pending_registration_email');
+        if (pendingEmail) {
+          setEmail(pendingEmail);
+          await AsyncStorage.removeItem('@pending_registration_email');
+        }
+      } catch (err) {
+        console.log('Failed to load pending registration email:', err);
+      }
+    };
+    loadPendingEmail();
+  }, []);
+
   const handleLogin = async () => {
     if (!email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
