@@ -6,6 +6,16 @@ import { ChevronLeft, MapPin, Calendar, CreditCard, Car, Bike, ShieldAlert, File
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const maskPhoneNumber = (phone: string) => {
+  if (!phone) return '—';
+  const cleanPhone = String(phone).trim();
+  if (cleanPhone.length < 4) return cleanPhone;
+  const prefix = cleanPhone.slice(0, 3);
+  const suffix = cleanPhone.slice(-2);
+  const middleMask = 'x'.repeat(Math.max(1, cleanPhone.length - 5));
+  return `${prefix}${middleMask}${suffix}`;
+};
+
 export default function DriverJobDetailScreen() {
   const { bookingId } = useLocalSearchParams();
   const router = useRouter();
@@ -187,7 +197,7 @@ export default function DriverJobDetailScreen() {
               </View>
               <View style={styles.infoTextWrapper}>
                 <Text style={styles.infoLabel}>Số điện thoại liên hệ</Text>
-                <Text style={styles.infoValue}>{booking.phone}</Text>
+                <Text style={styles.infoValue}>{maskPhoneNumber(booking.phone)}</Text>
               </View>
             </View>
           )}

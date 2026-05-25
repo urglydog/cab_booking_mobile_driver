@@ -2,15 +2,30 @@ import React, { useState } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import api, { GATEWAY_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
+import { clearAuthStorage, loginDriver } from '@/features/auth/services/authApi';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+
+  React.useEffect(() => {
+    const loadPendingEmail = async () => {
+      try {
+        const pendingEmail = await AsyncStorage.getItem('@pending_registration_email');
+        if (pendingEmail) {
+          setEmail(pendingEmail);
+          await AsyncStorage.removeItem('@pending_registration_email');
+        }
+      } catch (err) {
+        console.log('Failed to load pending registration email:', err);
+      }
+    };
+    loadPendingEmail();
+  }, []);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -20,44 +35,36 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      const response = await api.post('/api/auth/login', {
-        email,
-        password,
-        deviceId: 'mobile-app',
-        platform: 'ANDROID',
-      }, { baseURL: GATEWAY_URL }); // Go via API Gateway
+      const authResult = await loginDriver({ email, password });
+      const { accessToken, refreshToken, user } = authResult;
+      const isDriver = user?.role === 'ROLE_DRIVER' || user?.role === 'DRIVER';
 
-      const { accessToken, refreshToken, user } = response.data.result;
-      
-      await AsyncStorage.setItem('access_token', accessToken);
-      await AsyncStorage.setItem('refresh_token', refreshToken);
-      await AsyncStorage.setItem('user_id', user.userId);
-      await AsyncStorage.setItem('user_name', user.fullName);
-      await AsyncStorage.setItem('user_role', user.role || 'ROLE_USER');
-      await AsyncStorage.setItem('user_phone', user.phoneNumber || '');
-      await AsyncStorage.setItem('user_email', user.email || '');
+      if (!isDriver) {
+        await clearAuthStorage();
+        Alert.alert('Lỗi xác thực', 'Tài khoản của bạn không phải là Tài xế! Vui lòng sử dụng tài khoản Tài xế.');
+        return;
+      }
 
-      // Register device FCM token with Notification Service through API Gateway
+      await AsyncStorage.multiSet([
+        ['access_token', accessToken],
+        ['refresh_token', refreshToken],
+        ['user_id', String(user.userId)],
+        ['user_name', user.fullName || ''],
+        ['user_role', user.role || 'ROLE_DRIVER'],
+        ['user_phone', user.phoneNumber || ''],
+        ['user_email', user.email || ''],
+      ]);
+
       try {
         const mockFcmToken = 'mock-device-fcm-token-' + user.userId;
-        await api.post('/api/notifications/register-token', null, {
-          params: {
-            userId: user.userId,
-            token: mockFcmToken
-          }
-        });
+        await AsyncStorage.setItem('fcm_token', mockFcmToken);
         console.log('Successfully synchronized FCM Token:', mockFcmToken);
       } catch (fcmError) {
         console.warn('Failed to sync FCM Token with backend:', fcmError);
       }
 
       Alert.alert('Thành công', 'Đăng nhập thành công!');
-      if (user.role === 'ROLE_DRIVER' || user.role === 'DRIVER') {
-        router.replace('/(driver-tabs)');
-      } else {
-        Alert.alert('Lỗi xác thực', 'Tài khoản của bạn không phải là Tài xế! Vui lòng sử dụng tài khoản Tài xế.');
-        await AsyncStorage.multiRemove(['access_token', 'refresh_token', 'user_id', 'user_name', 'user_role']);
-      }
+      router.replace('/(driver-tabs)');
     } catch (error: any) {
       console.error(error);
       const message = error.response?.data?.message || 'Login failed. Please check your credentials.';
@@ -96,16 +103,16 @@ export default function LoginScreen() {
           />
         </View>
 
-        <TouchableOpacity 
-          style={[styles.button, loading && styles.buttonDisabled]} 
+        <TouchableOpacity
+          style={[styles.button, loading && styles.buttonDisabled]}
           onPress={handleLogin}
           disabled={loading}
         >
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log In</Text>}
         </TouchableOpacity>
 
-        <TouchableOpacity 
-          style={styles.registerLink} 
+        <TouchableOpacity
+          style={styles.registerLink}
           onPress={() => router.push('/register')}
         >
           <Text style={styles.registerText}>Don't have an account? <Text style={styles.registerHighlight}>Register now</Text></Text>

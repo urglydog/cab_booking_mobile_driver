@@ -22,8 +22,10 @@ export default function DriverChatScreen() {
   const [loading, setLoading] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
+  const roomId = Array.isArray(bookingId) ? bookingId[0] : String(bookingId ?? '');
+
   useEffect(() => {
-    if (!bookingId) return;
+    if (!roomId) return;
 
     setMessages([
       {
@@ -37,38 +39,57 @@ export default function DriverChatScreen() {
 
     if (!socket) return;
 
-    socket.emit('join_room', bookingId);
+    socket.emit('join_room', roomId);
 
     const handleReceiveMessage = (data: any) => {
-      if (String(data?.bookingId ?? '') !== String(bookingId)) return;
-      const sender = String(data?.sender ?? data?.senderRole ?? '').toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'DRIVER';
-      const newMessage: ChatMessage = {
-        id: `msg-${Date.now()}-${Math.random()}`,
-        sender,
-        message: String(data?.message ?? ''),
-        timestamp: data?.timestamp || Date.now(),
-      };
-      setMessages((prev) => [...prev, newMessage]);
+      if (String(data?.bookingId ?? '') !== roomId) return;
+      
+      setMessages((prev) => {
+        // Prevent dynamic duplicates if already rendered locally
+        if (data?.id && prev.some(m => m.id === data.id)) return prev;
+        if (prev.some(m => m.message === data.message && Math.abs(m.timestamp - (data.timestamp || 0)) < 2000)) return prev;
+
+        const sender = String(data?.sender ?? data?.senderRole ?? '').toUpperCase() === 'CUSTOMER' ? 'CUSTOMER' : 'DRIVER';
+        const newMessage: ChatMessage = {
+          id: data?.id || `msg-${Date.now()}-${Math.random()}`,
+          sender,
+          message: String(data?.message ?? ''),
+          timestamp: data?.timestamp || Date.now(),
+        };
+        return [...prev, newMessage];
+      });
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     };
 
     socket.on('receive_message', handleReceiveMessage);
 
     return () => {
-      socket.emit('leave_room', bookingId);
+      socket.emit('leave_room', roomId);
       socket.off('receive_message', handleReceiveMessage);
     };
-  }, [socket, bookingId]);
+  }, [socket, roomId]);
 
   const handleSendMessage = () => {
-    if (!inputText.trim() || !socket || !bookingId) return;
+    if (!inputText.trim() || !socket || !roomId) return;
 
-    socket.emit('send_message', {
-      bookingId,
+    const messageId = `msg-${Date.now()}-${Math.random()}`;
+    const payload = {
+      id: messageId,
+      bookingId: roomId,
       sender: 'DRIVER',
       message: inputText.trim(),
       timestamp: Date.now(),
-    });
+    };
+
+    // Instant local append for lightning-fast responsive UI
+    setMessages((prev) => [...prev, {
+      id: messageId,
+      sender: 'DRIVER',
+      message: inputText.trim(),
+      timestamp: Date.now()
+    }]);
+
+    socket.emit('send_message', payload);
     setInputText('');
   };
 
