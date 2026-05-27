@@ -14,20 +14,12 @@ export default function DriverMap({ currentTrip, tripState, routeCoordinates, is
   const sweep = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (!isOnline) {
-      pulse.stopAnimation();
-      sweep.stopAnimation();
-      pulse.setValue(0);
-      sweep.setValue(0);
-      return;
-    }
-
     const pulseLoop = Animated.loop(
       Animated.timing(pulse, {
         toValue: 1,
         duration: 1700,
         easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
+        useNativeDriver: false,
       })
     );
     const sweepLoop = Animated.loop(
@@ -35,7 +27,7 @@ export default function DriverMap({ currentTrip, tripState, routeCoordinates, is
         toValue: 1,
         duration: 2200,
         easing: Easing.linear,
-        useNativeDriver: true,
+        useNativeDriver: false,
       })
     );
     pulseLoop.start();
@@ -45,7 +37,7 @@ export default function DriverMap({ currentTrip, tripState, routeCoordinates, is
       pulseLoop.stop();
       sweepLoop.stop();
     };
-  }, [isOnline, pulse, sweep]);
+  }, [pulse, sweep]);
 
   const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 2.6] });
   const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] });
@@ -62,21 +54,21 @@ export default function DriverMap({ currentTrip, tripState, routeCoordinates, is
       }}
     >
       {/* Driver Active GPS Marker */}
-      <Marker coordinate={{ latitude: 10.8225, longitude: 106.6872 }} title="Vị trí của bạn">
+      <Marker
+        coordinate={{ latitude: 10.8225, longitude: 106.6872 }}
+        title="Vị trí của bạn"
+        tracksViewChanges={true}
+      >
         <View style={styles.driverMarkerWrap}>
-          {isOnline && (
-            <>
-              <Animated.View
-                style={[
-                  styles.radarPulse,
-                  { opacity: pulseOpacity, transform: [{ scale: pulseScale }] },
-                ]}
-              />
-              <Animated.View style={[styles.radarSweep, { transform: [{ rotate: sweepRotation }] }]}>
-                <View style={styles.radarSweepArm} />
-              </Animated.View>
-            </>
-          )}
+          <Animated.View
+            style={[
+              styles.radarPulse,
+              { opacity: pulseOpacity, transform: [{ scale: pulseScale }] },
+            ]}
+          />
+          <Animated.View style={[styles.radarSweep, { transform: [{ rotate: sweepRotation }] }]}>
+            <View style={styles.radarSweepArm} />
+          </Animated.View>
           <View style={styles.driverDotOuter}>
             <View style={styles.driverDotInner} />
           </View>
@@ -117,8 +109,8 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   driverMarkerWrap: {
-    width: 76,
-    height: 76,
+    width: 160,
+    height: 160,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -135,12 +127,15 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 32,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   radarSweepArm: {
     width: 2,
     height: 32,
     backgroundColor: 'rgba(99,102,241,0.55)',
     borderRadius: 1,
+    position: 'absolute',
+    top: 0,
   },
   driverDotOuter: {
     width: 28,

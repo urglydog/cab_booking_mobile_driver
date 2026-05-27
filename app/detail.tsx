@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, MapPin, Calendar, CreditCard, Car, Bike, ShieldAlert, FileText, Route, Clock, User, Phone } from 'lucide-react-native';
+import { ChevronLeft, MapPin, Calendar, CreditCard, Car, Bike, ShieldAlert, FileText, Route, Clock, User, Phone, Star } from 'lucide-react-native';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -21,6 +21,7 @@ export default function DriverJobDetailScreen() {
   const router = useRouter();
   const [booking, setBooking] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [review, setReview] = useState<any>(null);
 
   const fetchBookingDetail = async () => {
     setLoading(true);
@@ -95,6 +96,22 @@ export default function DriverJobDetailScreen() {
       fetchBookingDetail();
     }
   }, [bookingId]);
+
+  useEffect(() => {
+    const fetchReview = async () => {
+      if (booking && booking.status === 'COMPLETED') {
+        try {
+          const response = await api.get(`/api/reviews/ride/${booking.id}`);
+          if (response.data) {
+            setReview(response.data);
+          }
+        } catch (err) {
+          console.log('No review found for this booking detail.');
+        }
+      }
+    };
+    fetchReview();
+  }, [booking?.id, booking?.status]);
 
   const getStatusInVietnamese = (status: string) => {
     switch (String(status).toUpperCase()) {
@@ -172,8 +189,10 @@ export default function DriverJobDetailScreen() {
             </View>
           </View>
           <View style={styles.fareContainer}>
-            <Text style={styles.fareLabel}>Doanh thu nhận được</Text>
-            <Text style={styles.fareAmount}>+{formatVND(booking.estimatedFare)}</Text>
+            <Text style={styles.fareLabel}>Doanh thu nhận được (70%)</Text>
+            <Text style={[styles.fareAmount, booking.status === 'CANCELLED' && { color: '#6B7280' }]}>
+              {booking.status === 'CANCELLED' ? '0đ' : formatVND(booking.estimatedFare * 0.70)}
+            </Text>
           </View>
         </View>
 
@@ -186,7 +205,9 @@ export default function DriverJobDetailScreen() {
             </View>
             <View style={styles.infoTextWrapper}>
               <Text style={styles.infoLabel}>Tên khách hàng</Text>
-              <Text style={styles.infoValue}>{booking.customerName}</Text>
+              <Text style={styles.infoValue}>
+                {booking.status === 'COMPLETED' || booking.status === 'CANCELLED' ? 'Khách hàng' : booking.customerName}
+              </Text>
             </View>
           </View>
 
@@ -262,7 +283,9 @@ export default function DriverJobDetailScreen() {
               <Calendar size={20} color="#F59E0B" />
             </View>
             <View style={styles.infoTextWrapper}>
-              <Text style={styles.infoLabel}>Thời gian hoàn thành</Text>
+              <Text style={styles.infoLabel}>
+                {booking.status === 'CANCELLED' ? 'Thời gian hủy' : 'Thời gian hoàn thành'}
+              </Text>
               <Text style={styles.infoValue}>
                 {booking.createdAt ? new Date(booking.createdAt).toLocaleString('vi-VN') : '—'}
               </Text>
@@ -300,6 +323,35 @@ export default function DriverJobDetailScreen() {
             </View>
           </View>
         </View>
+
+        {/* 5.5. Đánh giá từ khách hàng */}
+        {booking.status === 'COMPLETED' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Đánh giá từ khách hàng</Text>
+            {review ? (
+              <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  {[1, 2, 3, 4, 5].map((s) => (
+                    <Star 
+                      key={s} 
+                      size={20} 
+                      color={s <= review.rating ? '#F59E0B' : '#E5E7EB'} 
+                      fill={s <= review.rating ? '#F59E0B' : 'transparent'} 
+                      style={{ marginHorizontal: 2 }}
+                    />
+                  ))}
+                </View>
+                <Text style={{ fontSize: 13, color: '#4B5563', textAlign: 'center', fontWeight: '500', fontStyle: review.comment ? 'normal' : 'italic' }}>
+                  {review.comment || 'Khách hàng không để lại nhận xét'}
+                </Text>
+              </View>
+            ) : (
+              <Text style={{ fontSize: 13, color: '#9CA3AF', textAlign: 'center', fontStyle: 'italic' }}>
+                Chuyến đi chưa được khách hàng đánh giá
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* 6. Metadata */}
         <View style={styles.metadataContainer}>

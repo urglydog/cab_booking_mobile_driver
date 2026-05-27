@@ -307,7 +307,7 @@ export default function DriverAccountScreen() {
               <Text style={styles.pendingKycTitle}>TÀI KHOẢN CHƯA KÍCH HOẠT</Text>
             </View>
             <Text style={styles.pendingKycDesc}>
-              Hồ sơ của bạn hiện đang ở trạng thái PENDING. Bạn cần hoàn thành xác thực xe và GPLX để được cấp quyền bật Online nhận chuyến.
+              Hồ sơ của bạn hiện đang chờ xử lý. Bạn cần hoàn thành xác thực xe và GPLX để được cấp quyền bật trực tuyến nhận chuyến.
             </Text>
             <TouchableOpacity 
               style={[styles.verifyKycButton, loadingVerify && { opacity: 0.7 }]} 
@@ -328,7 +328,7 @@ export default function DriverAccountScreen() {
               <Text style={styles.approvedKycTitle}>TÀI KHOẢN ĐÃ KÍCH HOẠT</Text>
             </View>
             <Text style={styles.approvedKycDesc}>
-              Hồ sơ của bạn đã được kiểm duyệt và phê duyệt thành công (verificationStatus = APPROVED). Bạn đã đủ điều kiện gạt nút ONLINE để đón khách.
+              Hồ sơ của bạn đã được kiểm duyệt và xác thực thành công. Bạn đã có thể bắt đầu bật trực tuyến để nhận cuốc ngay!
             </Text>
             <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#A7F3D0' }}>
               <Text style={{ fontSize: 11, fontWeight: '800', color: '#047857', letterSpacing: 0.5 }}>

@@ -23,6 +23,7 @@ export default function DriverEarningsScreen() {
   const [netBalance, setNetBalance] = useState(0);
   const [loading, setLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState<CompletedJob | null>(null);
+  const [selectedJobReview, setSelectedJobReview] = useState<any>(null);
   const [driverName, setDriverName] = useState('Tài xế');
   
   // Custom expandable accordions for the detail panel
@@ -192,6 +193,26 @@ export default function DriverEarningsScreen() {
       fetchEarningsAndJobs();
     }, [])
   );
+
+  useEffect(() => {
+    const fetchSelectedJobReview = async () => {
+      if (!selectedJob || selectedJob.status === 'CANCELLED' || selectedJob.status === 'WITHDRAWAL') {
+        setSelectedJobReview(null);
+        return;
+      }
+      try {
+        const response = await api.get(`/api/reviews/ride/${selectedJob.id}`);
+        if (response.data) {
+          setSelectedJobReview(response.data);
+        } else {
+          setSelectedJobReview(null);
+        }
+      } catch (err) {
+        setSelectedJobReview(null);
+      }
+    };
+    fetchSelectedJobReview();
+  }, [selectedJob]);
 
   const handleWithdraw = () => {
     if (netBalance === 0) {
@@ -712,8 +733,8 @@ export default function DriverEarningsScreen() {
                   <View style={styles.accordionBody}>
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLeftLabel}>Phí nền tảng CAB (30% Commission)</Text>
-                      <Text style={[styles.detailRightVal, { color: '#EF4444' }]}>
-                        -{Math.round(selectedJob.estimatedFare * 0.30).toLocaleString()}đ
+                      <Text style={[styles.detailRightVal, { color: selectedJob.status === 'CANCELLED' ? '#6B7280' : '#EF4444' }]}>
+                        {selectedJob.status === 'CANCELLED' ? '0đ' : `-${Math.round(selectedJob.estimatedFare * 0.30).toLocaleString()}đ`}
                       </Text>
                     </View>
                     <View style={styles.detailRow}>
@@ -736,15 +757,33 @@ export default function DriverEarningsScreen() {
 
                 {expandedSections.feedback && (
                   <View style={[styles.accordionBody, { alignItems: 'center', paddingVertical: 14 }]}>
-                    <Text style={styles.feedbackPassengerName}>{selectedJob.customerName}</Text>
-                    <View style={styles.starsRow}>
-                      <Star size={24} color="#F59E0B" fill="#F59E0B" style={{ marginHorizontal: 2 }} />
-                      <Star size={24} color="#F59E0B" fill="#F59E0B" style={{ marginHorizontal: 2 }} />
-                      <Star size={24} color="#F59E0B" fill="#F59E0B" style={{ marginHorizontal: 2 }} />
-                      <Star size={24} color="#F59E0B" fill="#F59E0B" style={{ marginHorizontal: 2 }} />
-                      <Star size={24} color="#F59E0B" fill="#F59E0B" style={{ marginHorizontal: 2 }} />
-                    </View>
-                    <Text style={styles.starsSubtext}>Khách hàng rất lịch sự & thân thiện</Text>
+                    <Text style={styles.feedbackPassengerName}>Khách hàng</Text>
+                    {selectedJob.status === 'CANCELLED' ? (
+                      <Text style={[styles.starsSubtext, { fontStyle: 'italic', marginTop: 4 }]}>
+                        Chuyến đi đã bị hủy
+                      </Text>
+                    ) : selectedJobReview ? (
+                      <>
+                        <View style={styles.starsRow}>
+                          {[1, 2, 3, 4, 5].map((s) => (
+                            <Star 
+                              key={s} 
+                              size={24} 
+                              color={s <= selectedJobReview.rating ? '#F59E0B' : '#E5E7EB'} 
+                              fill={s <= selectedJobReview.rating ? '#F59E0B' : 'transparent'} 
+                              style={{ marginHorizontal: 2 }} 
+                            />
+                          ))}
+                        </View>
+                        <Text style={styles.starsSubtext}>
+                          {selectedJobReview.comment || 'Khách hàng không để lại nhận xét'}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={[styles.starsSubtext, { fontStyle: 'italic', marginTop: 4 }]}>
+                        Chuyến đi chưa được khách hàng đánh giá
+                      </Text>
+                    )}
                   </View>
                 )}
               </View>

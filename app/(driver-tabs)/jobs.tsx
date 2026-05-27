@@ -46,7 +46,8 @@ export default function DriverJobsScreen() {
                 pickupLocation: b.pickupLocation,
                 dropoffLocation: b.dropoffLocation,
                 estimatedFare: b.estimatedFare,
-                createdAt: b.createdAt
+                createdAt: b.createdAt,
+                status: b.status
               }));
             // Merge database rides and local simulated rides, avoiding duplicates
             const combined = [...localJobs];
@@ -88,47 +89,54 @@ export default function DriverJobsScreen() {
     fetchJobs();
   };
 
-  const renderItem = ({ item }: { item: any }) => (
-    <TouchableOpacity
-      style={styles.jobItem}
-      activeOpacity={0.7}
-      onPress={() => router.push({ pathname: '/detail', params: { bookingId: item.id } })}
-    >
-      <View style={styles.jobHeader}>
-        <View style={styles.customerBox}>
-          <Text style={styles.customerLabel}>Khách hàng:</Text>
-          <Text style={styles.customerName}>{item.customerName}</Text>
-        </View>
-        <Text style={styles.fareAmount}>+{Math.round(item.estimatedFare * 0.70)?.toLocaleString()}đ</Text>
-      </View>
-
-      {/* Route Timeline */}
-      <View style={styles.routeContainer}>
-        <View style={styles.iconCol}>
-          <View style={styles.pickupDot} />
-          <View style={styles.lineConnector} />
-          <View style={styles.dropoffDot} />
-        </View>
-        <View style={styles.addressCol}>
-          <Text style={styles.addressText} numberOfLines={1}>{item.pickupLocation}</Text>
-          <Text style={[styles.addressText, { marginTop: 12 }]} numberOfLines={1}>{item.dropoffLocation}</Text>
-        </View>
-      </View>
-
-      {/* Date metadata */}
-      <View style={styles.jobFooter}>
-        <View style={styles.metaRow}>
-          <Calendar size={13} color="#9CA3AF" />
-          <Text style={styles.metaText}>
-            {new Date(item.createdAt).toLocaleString('vi-VN')}
+  const renderItem = ({ item }: { item: any }) => {
+    const isCancelled = item.status === 'CANCELLED';
+    return (
+      <TouchableOpacity
+        style={[styles.jobItem, isCancelled && styles.cancelledJobItem]}
+        activeOpacity={0.7}
+        onPress={() => router.push({ pathname: '/detail', params: { bookingId: item.id } })}
+      >
+        <View style={styles.jobHeader}>
+          <View style={styles.customerBox}>
+            <Text style={styles.customerLabel}>Khách hàng:</Text>
+            <Text style={styles.customerName}>Khách hàng</Text>
+          </View>
+          <Text style={[styles.fareAmount, isCancelled && styles.cancelledFare]}>
+            {isCancelled ? '0đ' : `${Math.round(item.estimatedFare * 0.70)?.toLocaleString()}đ`}
           </Text>
         </View>
-        <View style={styles.completedBadge}>
-          <Text style={styles.completedText}>Thành công</Text>
+
+        {/* Route Timeline */}
+        <View style={styles.routeContainer}>
+          <View style={styles.iconCol}>
+            <View style={styles.pickupDot} />
+            <View style={styles.lineConnector} />
+            <View style={styles.dropoffDot} />
+          </View>
+          <View style={styles.addressCol}>
+            <Text style={styles.addressText} numberOfLines={1}>{item.pickupLocation}</Text>
+            <Text style={[styles.addressText, { marginTop: 12 }]} numberOfLines={1}>{item.dropoffLocation}</Text>
+          </View>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+
+        {/* Date metadata */}
+        <View style={styles.jobFooter}>
+          <View style={styles.metaRow}>
+            <Calendar size={13} color="#9CA3AF" />
+            <Text style={styles.metaText}>
+              {new Date(item.createdAt).toLocaleString('vi-VN')}
+            </Text>
+          </View>
+          <View style={isCancelled ? styles.cancelledBadge : styles.completedBadge}>
+            <Text style={isCancelled ? styles.cancelledText : styles.completedText}>
+              {isCancelled ? 'Bị hủy' : 'Thành công'}
+            </Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -299,5 +307,25 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '700',
     color: '#065F46',
+  },
+  cancelledJobItem: {
+    opacity: 0.65,
+    backgroundColor: '#FAFAFA',
+    borderColor: '#E5E7EB',
+  },
+  cancelledFare: {
+    color: '#6B7280',
+    fontWeight: '600',
+  },
+  cancelledBadge: {
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  cancelledText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#EF4444',
   },
 });

@@ -46,11 +46,38 @@ export default function DriverMap({ currentTrip, tripState, isOnline = false }: 
 
         {/* Radar Active Circle at Driver position */}
         {isOnline && (
-          <>
-            <circle cx="280" cy="180" r="44" fill="#6366F1" opacity="0.08" />
-            <circle cx="280" cy="180" r="28" fill="none" stroke="#6366F1" strokeWidth="2" opacity="0.28" />
-            <line x1="280" y1="180" x2="280" y2="136" stroke="#6366F1" strokeWidth="3" opacity="0.55" />
-          </>
+          <g>
+            {/* Pulse 1 */}
+            <circle cx="280" cy="180" r="10" fill="#6366F1" opacity="0.4">
+              <animate attributeName="r" values="10;90" dur="2.5s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="0.4;0" dur="2.5s" repeatCount="indefinite" />
+            </circle>
+            {/* Pulse 2 */}
+            <circle cx="280" cy="180" r="10" fill="#6366F1" opacity="0.4">
+              <animate attributeName="r" values="10;90" dur="2.5s" begin="1.25s" repeatCount="indefinite" />
+              <animate attributeName="opacity" values="0.4;0" dur="2.5s" begin="1.25s" repeatCount="indefinite" />
+            </circle>
+            {/* Radar Boundary ring */}
+            <circle cx="280" cy="180" r="90" fill="none" stroke="#6366F1" strokeWidth="1.5" opacity="0.2" strokeDasharray="4 4" />
+            <circle cx="280" cy="180" r="60" fill="none" stroke="#6366F1" strokeWidth="1" opacity="0.15" />
+            <circle cx="280" cy="180" r="30" fill="none" stroke="#6366F1" strokeWidth="1" opacity="0.1" />
+            
+            {/* Rotating Radar Sweep */}
+            <g transform="translate(280, 180)">
+              <line x1="0" y1="0" x2="0" y2="-90" stroke="#6366F1" strokeWidth="2.5" opacity="0.75" />
+              {/* Semi-transparent sweep arm trails */}
+              <polygon points="0,0 -20,-87 0,-90" fill="#6366F1" opacity="0.15" />
+              <polygon points="0,0 -40,-80 -20,-87" fill="#6366F1" opacity="0.08" />
+              <animateTransform
+                attributeName="transform"
+                type="rotate"
+                from="0"
+                to="360"
+                dur="3s"
+                repeatCount="indefinite"
+              />
+            </g>
+          </g>
         )}
         <circle cx="280" cy="180" r="12" fill="#6366F1" opacity="0.4" />
         <circle cx="280" cy="180" r="6" fill="#6366F1" />
