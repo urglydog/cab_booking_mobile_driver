@@ -61,7 +61,7 @@ export default function DriverHomeScreen() {
   const [loading, setLoading] = useState(false);
   const [driverName, setDriverName] = useState('Tài xế');
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
-  
+
   // Trip Simulation State Machine
   // States: 'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'
   const [tripState, setTripState] = useState<'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'>('IDLE');
@@ -98,7 +98,7 @@ export default function DriverHomeScreen() {
       try {
         const name = await AsyncStorage.getItem('user_name');
         if (name) setDriverName(name);
-        
+
         // Attempt to fetch profile from driver-service to check real profile
         const res = await api.get('/api/drivers/me/profile');
         if (res.data && res.data.result) {
@@ -127,7 +127,7 @@ export default function DriverHomeScreen() {
         if (response.data && response.data.result) {
           const ride = response.data.result;
           const activeRideId = String(ride.rideId ?? ride.bookingId ?? '').trim();
-          
+
           if (!activeRideId) {
             if (tripState !== 'IDLE' && tripState !== 'COMPLETED_SUCCESS') {
               setTripState('IDLE');
@@ -139,7 +139,7 @@ export default function DriverHomeScreen() {
           // Map backend states to UI states
           // Backend states: PENDING_DRIVER | ASSIGNED | EN_ROUTE_PICKUP | IN_PROGRESS | COMPLETED / FINISHED
           const backendStatus = String(ride.rideStatus ?? '').toUpperCase();
-          
+
           let distanceVal = 1.5;
           if (ride.pickupLocation?.lat && ride.pickupLocation?.lng && ride.destinationLocation?.lat && ride.destinationLocation?.lng) {
             const rawDist = calculateHaversineDistance(
@@ -178,7 +178,7 @@ export default function DriverHomeScreen() {
             distance: `${distanceVal.toFixed(1)} km`,
             time: `${durationVal} phút`,
           };
-          
+
           setCurrentTrip(mappedTrip);
 
           if (backendStatus === 'ASSIGNED') {
@@ -268,7 +268,7 @@ export default function DriverHomeScreen() {
     setLoading(true);
     try {
       let currentStatus = verificationStatus;
-      
+
       if (value) {
         // Fetch the fresh profile from driver-service to check real status
         try {
@@ -334,7 +334,7 @@ export default function DriverHomeScreen() {
         errorMsg = error.message;
       }
       Alert.alert('Lỗi kết nối', errorMsg);
-      
+
       // Revert the toggle state
       setIsOnline(false);
       setTripState('IDLE');
@@ -420,7 +420,7 @@ export default function DriverHomeScreen() {
     } catch (e: any) {
       console.log('Failed to complete trip on server:', e.message || e);
     }
-    
+
     // Save to local storage driver-jobs list so it populates jobs.tsx!
     try {
       const existingJobsJson = await AsyncStorage.getItem('driver_completed_jobs');
@@ -469,7 +469,7 @@ export default function DriverHomeScreen() {
             <Text style={styles.driverName}>{driverName}</Text>
           </View>
         </View>
-        
+
         {/* Toggle Switch */}
         <View style={styles.onlineToggleWrapper}>
           <Text style={[styles.toggleText, isOnline ? styles.textOnline : styles.textOffline]}>
@@ -543,7 +543,7 @@ export default function DriverHomeScreen() {
                     <View style={styles.addressCol}>
                       <Text style={styles.addressTitle}>Điểm đón:</Text>
                       <Text style={styles.addressText} numberOfLines={1}>{currentTrip.pickupLocation}</Text>
-                      
+
                       <Text style={[styles.addressTitle, { marginTop: 10 }]}>Điểm trả:</Text>
                       <Text style={styles.addressText} numberOfLines={1}>{currentTrip.dropoffLocation}</Text>
                     </View>
@@ -595,9 +595,9 @@ export default function DriverHomeScreen() {
                   backgroundColor: tripState === 'ACCEPTED' ? '#F59E0B' : tripState === 'ARRIVED' ? '#6366F1' : '#10B981'
                 }]}>
                   <Text style={styles.activeStatusText}>
-                    {tripState === 'ACCEPTED' ? 'Đang di chuyển tới điểm đón' : 
-                     tripState === 'ARRIVED' ? 'Đã đến điểm đón - Chờ khách lên xe' : 
-                     'Đang chở khách đến điểm đến'}
+                    {tripState === 'ACCEPTED' ? 'Đang di chuyển tới điểm đón' :
+                      tripState === 'ARRIVED' ? 'Đã đến điểm đón - Chờ khách lên xe' :
+                        'Đang chở khách đến điểm đến'}
                   </Text>
                 </View>
 
@@ -682,7 +682,7 @@ export default function DriverHomeScreen() {
                   <Check size={36} color="#FFF" />
                 </View>
                 <Text style={styles.successTitle}>CHUYẾN ĐI HOÀN THÀNH!</Text>
-                
+
                 <View style={styles.successSummaryBox}>
                   <View style={styles.successSummaryRow}>
                     <Text style={styles.successSummaryLabel}>Tổng tiền khách trả:</Text>
