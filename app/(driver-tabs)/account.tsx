@@ -19,37 +19,26 @@ export default function DriverAccountScreen() {
       const userId = await AsyncStorage.getItem('user_id');
       if (!userId) return;
 
-      // Use driver profile's cancellationRate (only counts driver-initiated cancellations,
-      // NOT customer cancellations) for accurate stats display.
-      try {
-        const profileRes = await api.get('/api/drivers/me/profile');
-        if (profileRes.data?.result) {
-          const profile = profileRes.data.result;
-          const driverCancelRate = profile.cancellationRate ? parseFloat(profile.cancellationRate) : 0;
-          const completedRides = profile.totalCompletedRides || 0;
-          const acceptRate = completedRides > 0 ? Math.round(100 - driverCancelRate) : 100;
-          setStats({
-            acceptRate: Math.max(0, acceptRate),
-            cancelRate: Math.round(driverCancelRate),
-            totalRides: completedRides,
-          });
-          return;
-        }
-      } catch (profileErr) {
-        console.log('Failed to fetch driver profile stats, falling back to bookings:', profileErr);
-      }
-
-      // Fallback: count only completed rides (don't count customer cancellations)
       const response = await api.get(`/api/v1/bookings/driver/${userId}?page=0&size=100`);
       if (response.data?.result?.content) {
-        const bookings = response.data.result.content;
+        const bookings = response.data.result.content || [];
         const completed = bookings.filter((b: any) => b.status === 'COMPLETED').length;
-        setStats({ acceptRate: 100, cancelRate: 0, totalRides: completed });
+        const cancelled = bookings.filter((b: any) => b.status === 'CANCELLED').length;
+        
+        const totalRelevant = completed + cancelled;
+        const acceptRate = totalRelevant > 0 ? Math.round((completed / totalRelevant) * 100) : 100;
+        const cancelRate = totalRelevant > 0 ? Math.round((cancelled / totalRelevant) * 100) : 0;
+
+        setStats({
+          acceptRate: Math.max(0, acceptRate),
+          cancelRate: Math.max(0, cancelRate),
+          totalRides: completed,
+        });
       } else {
         setStats({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
       }
     } catch (err) {
-      console.log('Failed to fetch driver stats:', err);
+      console.log('Failed to fetch driver stats dynamically:', err);
     }
   };
 
