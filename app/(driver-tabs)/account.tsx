@@ -19,37 +19,35 @@ export default function DriverAccountScreen() {
     try {
       const userId = await AsyncStorage.getItem('user_id');
       if (!userId) return;
-      
+
+      // Use driver profile's cancellationRate (only counts driver-initiated cancellations,
+      // NOT customer cancellations) for accurate stats display.
+      try {
+        const profileRes = await api.get('/api/drivers/me/profile');
+        if (profileRes.data?.result) {
+          const profile = profileRes.data.result;
+          const driverCancelRate = profile.cancellationRate ? parseFloat(profile.cancellationRate) : 0;
+          const completedRides = profile.totalCompletedRides || 0;
+          const acceptRate = completedRides > 0 ? Math.round(100 - driverCancelRate) : 100;
+          setStats({
+            acceptRate: Math.max(0, acceptRate),
+            cancelRate: Math.round(driverCancelRate),
+            totalRides: completedRides,
+          });
+          return;
+        }
+      } catch (profileErr) {
+        console.log('Failed to fetch driver profile stats, falling back to bookings:', profileErr);
+      }
+
+      // Fallback: count only completed rides (don't count customer cancellations)
       const response = await api.get(`/api/v1/bookings/driver/${userId}?page=0&size=100`);
-      if (response.data && response.data.result && response.data.result.content) {
+      if (response.data?.result?.content) {
         const bookings = response.data.result.content;
         const completed = bookings.filter((b: any) => b.status === 'COMPLETED').length;
-        const cancelled = bookings.filter((b: any) => b.status === 'CANCELLED').length;
-        const total = completed + cancelled;
-        
-        if (total > 0) {
-          const acceptRate = Math.round((completed / total) * 100);
-          const cancelRate = Math.round((cancelled / total) * 100);
-          setStats({ acceptRate, cancelRate, totalRides: total });
-        } else {
-          // If no database rides yet, try local completed jobs count as fallback
-          const localStored = await AsyncStorage.getItem('driver_completed_jobs');
-          if (localStored) {
-            const jobs = JSON.parse(localStored);
-            const comp = jobs.filter((j: any) => j.status !== 'CANCELLED').length;
-            const canc = jobs.filter((j: any) => j.status === 'CANCELLED').length;
-            const tot = comp + canc;
-            if (tot > 0) {
-              setStats({
-                acceptRate: Math.round((comp / tot) * 100),
-                cancelRate: Math.round((canc / tot) * 100),
-                totalRides: tot
-              });
-              return;
-            }
-          }
-          setStats({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
-        }
+        setStats({ acceptRate: 100, cancelRate: 0, totalRides: completed });
+      } else {
+        setStats({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
       }
     } catch (err) {
       console.log('Failed to fetch driver stats:', err);
@@ -241,12 +239,44 @@ export default function DriverAccountScreen() {
           text: 'ĐĂNG XUẤT',
           onPress: async () => {
             try {
+              // CRITICAL: Set driver OFFLINE on backend BEFORE clearing local storage.
+              // This triggers DriverStatusService.clearAllDriverRedisKeys() which purges:
+              //   - driver:status:{driverId}
+              //   - driver:vehicleType:{driverId}
+              //   - driver:profile:{driverId}
+              //   - driver:lock:{driverId}
+              //   - driver:available:locations (GEO entry)
+              // Prevents stale GEO data from matching with wrong vehicle type after re-login.
+              try {
+                await api.put('/api/drivers/me/availability', {
+                  availabilityStatus: 'OFFLINE',
+                  currentLatitude: null,
+                  currentLongitude: null,
+                });
+                console.log('✅ Driver set OFFLINE on backend — Redis keys purged.');
+              } catch (offlineErr) {
+                console.warn('⚠️ Failed to set OFFLINE on backend (continuing logout):', offlineErr);
+              }
+
+              // Call auth-service logout to invalidate session
+              try {
+                const refreshToken = await AsyncStorage.getItem('refresh_token');
+                if (refreshToken) {
+                  await api.post('/api/auth/logout', { refreshToken });
+                }
+              } catch (authErr) {
+                console.warn('Auth logout failed, clearing local session anyway:', authErr);
+              }
+
               // Flush storage
               await AsyncStorage.removeItem('access_token');
               await AsyncStorage.removeItem('refresh_token');
               await AsyncStorage.removeItem('user_id');
               await AsyncStorage.removeItem('user_name');
               await AsyncStorage.removeItem('user_role');
+              await AsyncStorage.removeItem('user_phone');
+              await AsyncStorage.removeItem('user_email');
+              await AsyncStorage.removeItem('fcm_token');
               
               // Flush simulated earnings & jobs
               await AsyncStorage.removeItem('driver_completed_jobs');
