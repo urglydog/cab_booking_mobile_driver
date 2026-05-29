@@ -6,9 +6,10 @@ interface DriverMapProps {
   currentTrip: any;
   tripState: string;
   routeCoordinates: Array<{ latitude: number; longitude: number }>;
+  driverLocation: { latitude: number; longitude: number } | null;
 }
 
-export default function DriverMap({ currentTrip, tripState }: DriverMapProps) {
+export default function DriverMap({ currentTrip, tripState, driverLocation }: DriverMapProps) {
   return (
     <View style={styles.webMapContainer}>
       {/* Dynamic Visual SVG Grid Mock Map */}
@@ -54,6 +55,11 @@ export default function DriverMap({ currentTrip, tripState }: DriverMapProps) {
       <View style={styles.floatingWebPanel}>
         <Text style={styles.webMapBadgeTitle}>💻 CAB MAP ENGINE (WEB SIMULATOR)</Text>
         <Text style={styles.webMapBadgeDesc}>Bản đồ mô phỏng tự động đồng bộ hóa trên Web</Text>
+        {driverLocation && (
+          <Text style={styles.webMapCoords}>
+            GPS: {driverLocation.latitude.toFixed(5)}, {driverLocation.longitude.toFixed(5)}
+          </Text>
+        )}
       </View>
 
       {/* Render overlay elements based on tripState */}
@@ -118,6 +124,13 @@ const styles = StyleSheet.create({
     color: '#64748B',
     fontWeight: '600',
     marginTop: 2,
+  },
+  webMapCoords: {
+    fontSize: 9,
+    color: '#6366F1',
+    fontWeight: '700',
+    marginTop: 4,
+    fontFamily: 'monospace',
   },
   locationsPanel: {
     position: 'absolute',
