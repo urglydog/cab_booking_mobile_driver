@@ -3,22 +3,26 @@ import { StyleSheet, View, Text, TextInput, TouchableOpacity, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import api, { GATEWAY_URL } from '@/services/api';
-import { Colors } from '@/constants/Colors';
 
 export default function RegisterScreen() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [role, setRole] = useState<'USER' | 'DRIVER'>('DRIVER');
-  const [vehicleType, setVehicleType] = useState<'BIKE' | 'CAR4' | 'CAR7'>('BIKE');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const AsyncStorage = require('@react-native-async-storage/async-storage').default;
 
   const handleRegister = async () => {
-    if (!fullName || !email || !password || !phoneNumber) {
+    if (!fullName || !email || !password || !confirmPassword || !phoneNumber) {
       Alert.alert('Lỗi', 'Vui lòng nhập đầy đủ thông tin');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert('Lỗi', 'Mật khẩu nhập lại không khớp');
       return;
     }
 
@@ -36,8 +40,6 @@ export default function RegisterScreen() {
       }, { baseURL: GATEWAY_URL }); // Go via API Gateway
 
       if (response.status === 200 || response.status === 201) {
-        // Save the chosen vehicle type for the auto-activation flow
-        await AsyncStorage.setItem('@pending_registration_vehicle_type', vehicleType);
         await AsyncStorage.setItem('@pending_registration_email', email);
 
         Alert.alert('Thành công', 'Đăng ký tài khoản thành công! Vui lòng đăng nhập.', [
@@ -106,29 +108,14 @@ export default function RegisterScreen() {
           </View>
 
           <View style={styles.inputContainer}>
-            <Text style={styles.label}>Chọn loại phương tiện hoạt động</Text>
-            <View style={styles.roleSelectorRow}>
-              <TouchableOpacity 
-                style={[styles.roleSelectButton, vehicleType === 'BIKE' && styles.roleActiveButton]}
-                onPress={() => setVehicleType('BIKE')}
-              >
-                <Text style={[styles.roleSelectText, vehicleType === 'BIKE' && styles.roleActiveText]}>🏍️ Xe máy</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.roleSelectButton, vehicleType === 'CAR4' && styles.roleActiveButton]}
-                onPress={() => setVehicleType('CAR4')}
-              >
-                <Text style={[styles.roleSelectText, vehicleType === 'CAR4' && styles.roleActiveText]}>🚗 4 Chỗ</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity 
-                style={[styles.roleSelectButton, vehicleType === 'CAR7' && styles.roleActiveButton]}
-                onPress={() => setVehicleType('CAR7')}
-              >
-                <Text style={[styles.roleSelectText, vehicleType === 'CAR7' && styles.roleActiveText]}>🚐 7 Chỗ</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.label}>Confirm Password</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Re-enter your password"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry
+            />
           </View>
 
           <TouchableOpacity 
@@ -224,32 +211,5 @@ const styles = StyleSheet.create({
     color: '#6366F1',
     fontWeight: 'bold',
   },
-  roleSelectorRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 4,
-  },
-  roleSelectButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#E2E2E2',
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9F9F9',
-  },
-  roleActiveButton: {
-    borderColor: '#6366F1',
-    backgroundColor: '#EEF2F6',
-  },
-  roleSelectText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  roleActiveText: {
-    color: '#6366F1',
-    fontWeight: '800',
-  }
+  
 });

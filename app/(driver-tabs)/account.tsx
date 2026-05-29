@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { User, LogOut, Shield, PhoneCall, CreditCard, ChevronRight, Car, Bike, AlertTriangle, CheckCircle2 } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,9 +10,8 @@ export default function DriverAccountScreen() {
   const router = useRouter();
   const [driverName, setDriverName] = useState('Tài xế');
   const [driverPhone, setDriverPhone] = useState('090 123 4567');
-  const [vehicleInfo, setVehicleInfo] = useState('Xe ô tô • 51H-12345 (Toyota Vios)');
+  const [vehicleInfo, setVehicleInfo] = useState('Chưa kích hoạt');
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
-  const [loadingVerify, setLoadingVerify] = useState(false);
   const [stats, setStats] = useState({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
 
   const fetchStats = async () => {
@@ -54,70 +53,6 @@ export default function DriverAccountScreen() {
     }
   };
 
-  const handleVerifyKYC = async (vehicleType: 'BIKE' | 'CAR4' | 'CAR7') => {
-    setLoadingVerify(true);
-    try {
-      let vehiclePlate = '51H-12345';
-      let vehicleModel = 'Toyota Vios';
-      let vehicleColor = 'Black';
-      if (vehicleType === 'BIKE') {
-        vehiclePlate = '59A-12345';
-        vehicleModel = 'Honda SH';
-        vehicleColor = 'Red';
-      } else if (vehicleType === 'CAR7') {
-        vehiclePlate = '51A-77777';
-        vehicleModel = 'Mitsubishi Xpander';
-        vehicleColor = 'Silver';
-      }
-
-      const freshName = await AsyncStorage.getItem('user_name') || driverName;
-      const freshPhone = await AsyncStorage.getItem('user_phone') || driverPhone;
-      const freshEmail = await AsyncStorage.getItem('user_email') || undefined;
-
-      // Call PUT /api/drivers/me/profile to auto-approve the driver profile on backend dev environment
-      const res = await api.put('/api/drivers/me/profile', {
-        fullName: freshName,
-        email: freshEmail,
-        phoneNumber: freshPhone,
-        avatarUrl: 'https://example.com/avatar/default.png',
-        licenseNumber: 'GPLX-999999',
-        vehicleType: vehicleType,
-        vehiclePlate: vehiclePlate,
-        vehicleModel: vehicleModel,
-        vehicleColor: vehicleColor,
-        serviceArea: 'Ho Chi Minh City'
-      });
-
-      if (res.status === 200 || res.status === 201) {
-        Alert.alert(
-          'Thành công 🎉',
-          `Xác thực và kích hoạt xe ${vehicleType === 'BIKE' ? 'Xe máy (BIKE)' : vehicleType === 'CAR4' ? 'Xe 4 chỗ (CAR4)' : 'Xe 7 chỗ (CAR7)'} thành công! Trạng thái của bạn đã chuyển sang APPROVED.\n\nBây giờ bạn có thể quay lại trang chủ và gạt nút ONLINE!`
-        );
-        // Refresh local UI state
-        if (res.data && res.data.result) {
-          const profile = res.data.result;
-          setDriverName(profile.fullName || freshName);
-          if (profile.phoneNumber) setDriverPhone(profile.phoneNumber);
-          if (profile.verificationStatus) {
-            setVerificationStatus(profile.verificationStatus);
-          }
-          if (profile.vehiclePlate) {
-            let typeLabel = 'Xe 4 chỗ';
-            if (profile.vehicleType === 'BIKE') typeLabel = 'Xe máy';
-            else if (profile.vehicleType === 'CAR7') typeLabel = 'Xe 7 chỗ';
-            setVehicleInfo(`${typeLabel} • ${profile.vehiclePlate} (${profile.vehicleModel})`);
-          }
-        }
-      }
-    } catch (e: any) {
-      console.error(e);
-      const msg = e.response?.data?.message || 'Không thể kết nối đến máy chủ xác thực.';
-      Alert.alert('Thất bại', msg);
-    } finally {
-      setLoadingVerify(false);
-    }
-  };
-
   const loadProfile = async () => {
     try {
       const token = await AsyncStorage.getItem('access_token');
@@ -144,25 +79,19 @@ export default function DriverAccountScreen() {
           if (profile.verificationStatus) {
             setVerificationStatus(profile.verificationStatus);
           }
-          if (profile.vehiclePlate) {
+          if (profile.verificationStatus === 'APPROVED' && profile.vehiclePlate) {
             let typeLabel = 'Xe 4 chỗ';
             if (profile.vehicleType === 'BIKE') typeLabel = 'Xe máy';
             else if (profile.vehicleType === 'CAR7') typeLabel = 'Xe 7 chỗ';
             setVehicleInfo(`${typeLabel} • ${profile.vehiclePlate} (${profile.vehicleModel})`);
+          } else {
+            setVehicleInfo('Chưa kích hoạt');
           }
         }
       } catch (profileErr) {
         console.log('Profile get request failed (likely not created yet on server):', profileErr);
       }
 
-      if (!profileFetched) {
-        // Auto-check for pending registration vehicle type
-        const pendingType = await AsyncStorage.getItem('@pending_registration_vehicle_type');
-        if (pendingType) {
-          // Auto-trigger KYC verification!
-          await handleVerifyKYC(pendingType as any);
-        }
-      }
     } catch (err) {
       console.log('Driver profile load failed, using fallback.');
     }
@@ -179,55 +108,6 @@ export default function DriverAccountScreen() {
       fetchStats();
     }, [])
   );
-
-  const handleVerifyPrompt = async () => {
-    try {
-      const pendingType = await AsyncStorage.getItem('@pending_registration_vehicle_type');
-      if (pendingType === 'BIKE' || pendingType === 'CAR4' || pendingType === 'CAR7') {
-        const vehicleLabel = pendingType === 'BIKE' ? 'Xe máy (BIKE)' : pendingType === 'CAR4' ? 'Xe 4 chỗ (CAR4)' : 'Xe 7 chỗ (CAR7)';
-        Alert.alert(
-          'Kích hoạt phương tiện',
-          `Kích hoạt phương tiện ${vehicleLabel} bạn đã đăng ký hoạt động với CAB?`,
-          [
-            {
-              text: 'Hủy bỏ',
-              style: 'cancel'
-            },
-            {
-              text: 'XÁC NHẬN KÍCH HOẠT',
-              onPress: () => handleVerifyKYC(pendingType as any)
-            }
-          ]
-        );
-      } else {
-        // Fallback if not registered through standard flow
-        Alert.alert(
-          'Đăng ký / Kích hoạt xe',
-          'Vui lòng chọn loại xe bạn đăng ký hoạt động với CAB:',
-          [
-            {
-              text: '🏍️ Xe máy (BIKE)',
-              onPress: () => handleVerifyKYC('BIKE')
-            },
-            {
-              text: '🚗 Ô tô 4 chỗ (CAR4)',
-              onPress: () => handleVerifyKYC('CAR4')
-            },
-            {
-              text: '🚐 Ô tô 7 chỗ (CAR7)',
-              onPress: () => handleVerifyKYC('CAR7')
-            },
-            {
-              text: 'Hủy bỏ',
-              style: 'cancel'
-            }
-          ]
-        );
-      }
-    } catch (error) {
-      console.log('Failed to prompt activation:', error);
-    }
-  };
 
   const handleLogout = async () => {
     Alert.alert(
@@ -339,17 +219,7 @@ export default function DriverAccountScreen() {
             <Text style={styles.pendingKycDesc}>
               Hồ sơ của bạn hiện đang chờ xử lý. Bạn cần hoàn thành xác thực xe và GPLX để được cấp quyền bật trực tuyến nhận chuyến.
             </Text>
-            <TouchableOpacity 
-              style={[styles.verifyKycButton, loadingVerify && { opacity: 0.7 }]} 
-              onPress={handleVerifyPrompt}
-              disabled={loadingVerify}
-            >
-              {loadingVerify ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <Text style={styles.verifyKycButtonText}>KÍCH HOẠT TÀI KHOẢN NGAY</Text>
-              )}
-            </TouchableOpacity>
+            <Text style={styles.pendingKycHint}>Vui lòng liên hệ admin để kích hoạt hồ sơ tài xế.</Text>
           </View>
         ) : (
           <View style={styles.approvedKycCard}>
@@ -372,7 +242,9 @@ export default function DriverAccountScreen() {
         <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Phương tiện đăng ký</Text>
         <View style={styles.vehicleCard}>
           <View style={styles.vehicleIconCircle}>
-            {vehicleInfo.includes('Xe máy') ? (
+            {verificationStatus !== 'APPROVED' ? (
+              <AlertTriangle size={20} color="#F59E0B" />
+            ) : vehicleInfo.includes('Xe máy') ? (
               <Bike size={20} color="#6366F1" />
             ) : (
               <Car size={20} color="#6366F1" />
@@ -649,19 +521,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: 12,
   },
-  verifyKycButton: {
-    height: 44,
-    backgroundColor: '#D97706',
-    borderRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 1,
-  },
-  verifyKycButtonText: {
-    color: '#FFF',
+  pendingKycHint: {
     fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
+    color: '#92400E',
+    fontWeight: '600',
+    lineHeight: 18,
   },
   approvedKycCard: {
     backgroundColor: '#ECFDF5',
