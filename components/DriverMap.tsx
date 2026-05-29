@@ -1,30 +1,75 @@
-import React from 'react';
-import { StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 
 interface DriverMapProps {
   currentTrip: any;
   tripState: string;
-  routeCoordinates: Array<{ latitude: number; longitude: number }>;
+  routeCoordinates: { latitude: number; longitude: number }[];
   driverLocation: { latitude: number; longitude: number } | null;
+  isOnline?: boolean;
 }
 
-// Fallback center: Ho Chi Minh City center (used only when no GPS yet)
 const DEFAULT_CENTER = { latitude: 10.8231, longitude: 106.6297 };
 const DEFAULT_DELTA = { latitudeDelta: 0.04, longitudeDelta: 0.04 };
 
-export default function DriverMap({ currentTrip, tripState, routeCoordinates, driverLocation }: DriverMapProps) {
-  // Use real GPS for initialRegion; fallback to default when no GPS available
+export default function DriverMap({
+  currentTrip,
+  tripState,
+  routeCoordinates,
+  driverLocation,
+  isOnline = false,
+}: DriverMapProps) {
+  const pulse = useRef(new Animated.Value(0)).current;
+  const sweep = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!isOnline || !driverLocation) {
+      pulse.stopAnimation();
+      sweep.stopAnimation();
+      pulse.setValue(0);
+      sweep.setValue(0);
+      return;
+    }
+
+    const pulseLoop = Animated.loop(
+      Animated.timing(pulse, {
+        toValue: 1,
+        duration: 1700,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      })
+    );
+    const sweepLoop = Animated.loop(
+      Animated.timing(sweep, {
+        toValue: 1,
+        duration: 2200,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      })
+    );
+
+    pulseLoop.start();
+    sweepLoop.start();
+
+    return () => {
+      pulseLoop.stop();
+      sweepLoop.stop();
+    };
+  }, [driverLocation, isOnline, pulse, sweep]);
+
+  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 2.6] });
+  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] });
+  const sweepRotation = sweep.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
   const region = driverLocation
     ? { ...driverLocation, ...DEFAULT_DELTA }
     : { ...DEFAULT_CENTER, ...DEFAULT_DELTA };
 
-  // Pickup coordinates from currentTrip (mapped from backend DriverCurrentRideResponse.pickupLocation)
   const pickupCoords = currentTrip?.pickupLatitude != null && currentTrip?.pickupLongitude != null
     ? { latitude: Number(currentTrip.pickupLatitude), longitude: Number(currentTrip.pickupLongitude) }
     : null;
 
-  // Dropoff coordinates from currentTrip (mapped from backend DriverCurrentRideResponse.destinationLocation)
   const dropoffCoords = currentTrip?.dropoffLatitude != null && currentTrip?.dropoffLongitude != null
     ? { latitude: Number(currentTrip.dropoffLatitude), longitude: Number(currentTrip.dropoffLongitude) }
     : null;
@@ -35,17 +80,34 @@ export default function DriverMap({ currentTrip, tripState, routeCoordinates, dr
       initialRegion={region}
       showsUserLocation={false}
     >
-      {/* Driver Real GPS Marker — only render when we have real coordinates */}
       {driverLocation && (
         <Marker
           coordinate={driverLocation}
           title="Vị trí của bạn"
           description="Bạn đang trực tuyến nhận khách"
-          pinColor="#6366F1"
-        />
+          tracksViewChanges={true}
+        >
+          <View style={styles.driverMarkerWrap}>
+            {isOnline && (
+              <>
+                <Animated.View
+                  style={[
+                    styles.radarPulse,
+                    { opacity: pulseOpacity, transform: [{ scale: pulseScale }] },
+                  ]}
+                />
+                <Animated.View style={[styles.radarSweep, { transform: [{ rotate: sweepRotation }] }]}>
+                  <View style={styles.radarSweepArm} />
+                </Animated.View>
+              </>
+            )}
+            <View style={styles.driverDotOuter}>
+              <View style={styles.driverDotInner} />
+            </View>
+          </View>
+        </Marker>
       )}
 
-      {/* Render Trip locations if proposed or in progress */}
       {currentTrip && tripState !== 'IDLE' && (
         <>
           {pickupCoords && (
@@ -64,8 +126,6 @@ export default function DriverMap({ currentTrip, tripState, routeCoordinates, dr
               pinColor="#EF4444"
             />
           )}
-
-          {/* Real-time street route polyline for the driver */}
           {routeCoordinates.length > 0 && (
             <Polyline
               coordinates={routeCoordinates}
@@ -83,5 +143,48 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: '100%',
+  },
+  driverMarkerWrap: {
+    width: 160,
+    height: 160,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  radarPulse: {
+    position: 'absolute',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#6366F1',
+  },
+  radarSweep: {
+    position: 'absolute',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+  },
+  radarSweepArm: {
+    width: 2,
+    height: 32,
+    backgroundColor: 'rgba(99,102,241,0.55)',
+    borderRadius: 1,
+  },
+  driverDotOuter: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#6366F1',
+  },
+  driverDotInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#6366F1',
   },
 });

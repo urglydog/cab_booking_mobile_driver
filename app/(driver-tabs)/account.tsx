@@ -19,37 +19,35 @@ export default function DriverAccountScreen() {
     try {
       const userId = await AsyncStorage.getItem('user_id');
       if (!userId) return;
-      
+
+      // Use driver profile's cancellationRate (only counts driver-initiated cancellations,
+      // NOT customer cancellations) for accurate stats display.
+      try {
+        const profileRes = await api.get('/api/drivers/me/profile');
+        if (profileRes.data?.result) {
+          const profile = profileRes.data.result;
+          const driverCancelRate = profile.cancellationRate ? parseFloat(profile.cancellationRate) : 0;
+          const completedRides = profile.totalCompletedRides || 0;
+          const acceptRate = completedRides > 0 ? Math.round(100 - driverCancelRate) : 100;
+          setStats({
+            acceptRate: Math.max(0, acceptRate),
+            cancelRate: Math.round(driverCancelRate),
+            totalRides: completedRides,
+          });
+          return;
+        }
+      } catch (profileErr) {
+        console.log('Failed to fetch driver profile stats, falling back to bookings:', profileErr);
+      }
+
+      // Fallback: count only completed rides (don't count customer cancellations)
       const response = await api.get(`/api/v1/bookings/driver/${userId}?page=0&size=100`);
-      if (response.data && response.data.result && response.data.result.content) {
+      if (response.data?.result?.content) {
         const bookings = response.data.result.content;
         const completed = bookings.filter((b: any) => b.status === 'COMPLETED').length;
-        const cancelled = bookings.filter((b: any) => b.status === 'CANCELLED').length;
-        const total = completed + cancelled;
-        
-        if (total > 0) {
-          const acceptRate = Math.round((completed / total) * 100);
-          const cancelRate = Math.round((cancelled / total) * 100);
-          setStats({ acceptRate, cancelRate, totalRides: total });
-        } else {
-          // If no database rides yet, try local completed jobs count as fallback
-          const localStored = await AsyncStorage.getItem('driver_completed_jobs');
-          if (localStored) {
-            const jobs = JSON.parse(localStored);
-            const comp = jobs.filter((j: any) => j.status !== 'CANCELLED').length;
-            const canc = jobs.filter((j: any) => j.status === 'CANCELLED').length;
-            const tot = comp + canc;
-            if (tot > 0) {
-              setStats({
-                acceptRate: Math.round((comp / tot) * 100),
-                cancelRate: Math.round((canc / tot) * 100),
-                totalRides: tot
-              });
-              return;
-            }
-          }
-          setStats({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
-        }
+        setStats({ acceptRate: 100, cancelRate: 0, totalRides: completed });
+      } else {
+        setStats({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
       }
     } catch (err) {
       console.log('Failed to fetch driver stats:', err);
@@ -241,12 +239,44 @@ export default function DriverAccountScreen() {
           text: 'ĐĂNG XUẤT',
           onPress: async () => {
             try {
+              // CRITICAL: Set driver OFFLINE on backend BEFORE clearing local storage.
+              // This triggers DriverStatusService.clearAllDriverRedisKeys() which purges:
+              //   - driver:status:{driverId}
+              //   - driver:vehicleType:{driverId}
+              //   - driver:profile:{driverId}
+              //   - driver:lock:{driverId}
+              //   - driver:available:locations (GEO entry)
+              // Prevents stale GEO data from matching with wrong vehicle type after re-login.
+              try {
+                await api.put('/api/drivers/me/availability', {
+                  availabilityStatus: 'OFFLINE',
+                  currentLatitude: null,
+                  currentLongitude: null,
+                });
+                console.log('✅ Driver set OFFLINE on backend — Redis keys purged.');
+              } catch (offlineErr) {
+                console.warn('⚠️ Failed to set OFFLINE on backend (continuing logout):', offlineErr);
+              }
+
+              // Call auth-service logout to invalidate session
+              try {
+                const refreshToken = await AsyncStorage.getItem('refresh_token');
+                if (refreshToken) {
+                  await api.post('/api/auth/logout', { refreshToken });
+                }
+              } catch (authErr) {
+                console.warn('Auth logout failed, clearing local session anyway:', authErr);
+              }
+
               // Flush storage
               await AsyncStorage.removeItem('access_token');
               await AsyncStorage.removeItem('refresh_token');
               await AsyncStorage.removeItem('user_id');
               await AsyncStorage.removeItem('user_name');
               await AsyncStorage.removeItem('user_role');
+              await AsyncStorage.removeItem('user_phone');
+              await AsyncStorage.removeItem('user_email');
+              await AsyncStorage.removeItem('fcm_token');
               
               // Flush simulated earnings & jobs
               await AsyncStorage.removeItem('driver_completed_jobs');
@@ -307,7 +337,7 @@ export default function DriverAccountScreen() {
               <Text style={styles.pendingKycTitle}>TÀI KHOẢN CHƯA KÍCH HOẠT</Text>
             </View>
             <Text style={styles.pendingKycDesc}>
-              Hồ sơ của bạn hiện đang ở trạng thái PENDING. Bạn cần hoàn thành xác thực xe và GPLX để được cấp quyền bật Online nhận chuyến.
+              Hồ sơ của bạn hiện đang chờ xử lý. Bạn cần hoàn thành xác thực xe và GPLX để được cấp quyền bật trực tuyến nhận chuyến.
             </Text>
             <TouchableOpacity 
               style={[styles.verifyKycButton, loadingVerify && { opacity: 0.7 }]} 
@@ -328,7 +358,7 @@ export default function DriverAccountScreen() {
               <Text style={styles.approvedKycTitle}>TÀI KHOẢN ĐÃ KÍCH HOẠT</Text>
             </View>
             <Text style={styles.approvedKycDesc}>
-              Hồ sơ của bạn đã được kiểm duyệt và phê duyệt thành công (verificationStatus = APPROVED). Bạn đã đủ điều kiện gạt nút ONLINE để đón khách.
+              Hồ sơ của bạn đã được kiểm duyệt và xác thực thành công. Bạn đã có thể bắt đầu bật trực tuyến để nhận cuốc ngay!
             </Text>
             <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#A7F3D0' }}>
               <Text style={{ fontSize: 11, fontWeight: '800', color: '#047857', letterSpacing: 0.5 }}>
@@ -339,7 +369,7 @@ export default function DriverAccountScreen() {
         )}
 
         {/* Vehicle Information */}
-        <Text style={styles.sectionTitle} style={{ marginTop: 16 }}>Phương tiện đăng ký</Text>
+        <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Phương tiện đăng ký</Text>
         <View style={styles.vehicleCard}>
           <View style={styles.vehicleIconCircle}>
             {vehicleInfo.includes('Xe máy') ? (
@@ -357,7 +387,7 @@ export default function DriverAccountScreen() {
         {/* Menu Items */}
         <Text style={styles.sectionTitle}>Cài đặt tài khoản</Text>
         <View style={styles.menuContainer}>
-          <TouchableOpacity style={styles.menuItem} onPress={handleVerifyPrompt}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => Alert.alert('Thông báo', 'Tính năng Hồ sơ cá nhân & Xác thực đang được phát triển.')}>
             <View style={styles.menuItemLeft}>
               <User size={18} color="#4B5563" />
               <Text style={styles.menuItemText}>Hồ sơ cá nhân & Xác thực</Text>

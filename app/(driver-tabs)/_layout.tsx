@@ -1,6 +1,6 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Compass, ClipboardList, Wallet, User } from 'lucide-react-native';
+import { Bot, Compass, ClipboardList, Wallet, User } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -44,10 +44,23 @@ export default function DriverTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="ai-assistant"
+        options={{
+          title: 'Trợ lý',
+          tabBarIcon: ({ color }) => <Bot size={24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="account"
         options={{
           title: 'Tài khoản',
           tabBarIcon: ({ color }) => <User size={24} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          href: null,
         }}
       />
     </Tabs>

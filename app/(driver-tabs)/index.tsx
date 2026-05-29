@@ -77,14 +77,14 @@ export default function DriverHomeScreen() {
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
   const [driverName, setDriverName] = useState('Tài xế');
-  const [verificationStatus, setVerificationStatus] = useState<string>('PENDING');
-  
+  const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
   // Trip Simulation State Machine
   // States: 'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'
   const [tripState, setTripState] = useState<'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'>('IDLE');
   const [countdown, setCountdown] = useState(15);
   const [currentTrip, setCurrentTrip] = useState<any>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<Array<{ latitude: number; longitude: number }>>([]);
+  const [completingTrip, setCompletingTrip] = useState(false);
 
   useEffect(() => {
     const isActiveTrip = tripState === 'ACCEPTED' || tripState === 'ARRIVED' || tripState === 'IN_PROGRESS';
@@ -108,7 +108,6 @@ export default function DriverHomeScreen() {
       console.log('Error modifying tab bar style:', e);
     }
   }, [tripState, navigation]);
-
   // Real GPS location management (permission, watcher, heartbeat)
   const hasActiveRide = tripState === 'ACCEPTED' || tripState === 'ARRIVED' || tripState === 'IN_PROGRESS';
   const { driverLocation, getCurrentPosition } = useDriverLocation(isOnline, hasActiveRide);
@@ -125,7 +124,7 @@ export default function DriverHomeScreen() {
       try {
         const name = await AsyncStorage.getItem('user_name');
         if (name) setDriverName(name);
-        
+
         // Attempt to fetch profile from driver-service to check real profile
         const res = await api.get('/api/drivers/me/profile');
         if (res.data && res.data.result) {
@@ -156,7 +155,7 @@ export default function DriverHomeScreen() {
         if (response.data && response.data.result) {
           const ride = response.data.result;
           const activeRideId = String(ride.rideId ?? ride.bookingId ?? '').trim();
-          
+
           if (!activeRideId) {
             if (tripState !== 'IDLE' && tripState !== 'COMPLETED_SUCCESS') {
               setTripState('IDLE');
@@ -168,7 +167,7 @@ export default function DriverHomeScreen() {
           // Map backend states to UI states
           // Backend states: PENDING_DRIVER | ASSIGNED | EN_ROUTE_PICKUP | IN_PROGRESS | COMPLETED / FINISHED
           const backendStatus = String(ride.rideStatus ?? '').toUpperCase();
-          
+
           let distanceVal = 1.5;
           if (ride.pickupLocation?.lat && ride.pickupLocation?.lng && ride.destinationLocation?.lat && ride.destinationLocation?.lng) {
             const rawDist = calculateHaversineDistance(
@@ -212,7 +211,7 @@ export default function DriverHomeScreen() {
             dropoffLatitude: ride.destinationLocation?.lat ?? null,
             dropoffLongitude: ride.destinationLocation?.lng ?? null,
           };
-          
+
           setCurrentTrip(mappedTrip);
 
           if (backendStatus === 'ASSIGNED') {
@@ -347,6 +346,7 @@ export default function DriverHomeScreen() {
   const toggleOnline = async (value: boolean) => {
     setLoading(true);
     try {
+      let currentStatus = verificationStatus;
       if (value) {
         // ── Re-check fresh profile status before going ONLINE ──
         try {
@@ -354,6 +354,7 @@ export default function DriverHomeScreen() {
           if (res.data && res.data.result) {
             const profile = res.data.result;
             if (profile.verificationStatus) {
+              currentStatus = profile.verificationStatus;
               setVerificationStatus(profile.verificationStatus);
             }
           }
@@ -362,10 +363,10 @@ export default function DriverHomeScreen() {
         }
 
         // ── Guard: driver must be APPROVED before going ONLINE ──
-        if (verificationStatus !== 'APPROVED') {
+        if (currentStatus !== 'APPROVED') {
           Alert.alert(
             'Tài khoản chưa được duyệt',
-            `Trạng thái hồ sơ: ${verificationStatus}. Bạn cần được admin duyệt (APPROVED) trước khi có thể bật Online nhận khách.`,
+            `Trạng thái hồ sơ: ${currentStatus}. Bạn cần được admin duyệt (APPROVED) trước khi có thể bật Online nhận khách.`,
             [{ text: 'OK' }]
           );
           setLoading(false);
@@ -538,7 +539,8 @@ export default function DriverHomeScreen() {
   };
 
   const handleCompleteTrip = async () => {
-    if (!currentTrip?.id) return;
+    if (completingTrip || !currentTrip?.id) return;
+    setCompletingTrip(true);
     try {
       // P0-01 FIX: PRIMARY — call ride-service lifecycle endpoint (triggers Kafka ride.completed → notification-service + booking-service)
       await api.post(`/api/v1/rides/${currentTrip.id}/complete`, {
@@ -566,31 +568,40 @@ export default function DriverHomeScreen() {
         });
       } catch (_) { /* ignore fallback error */ }
     }
-    
+
     // Save to local storage driver-jobs list so it populates jobs.tsx!
     try {
       const existingJobsJson = await AsyncStorage.getItem('driver_completed_jobs');
       const jobs = existingJobsJson ? JSON.parse(existingJobsJson) : [];
+      const currentTripId = String(currentTrip.id);
       const newJob = {
-        id: currentTrip.id,
+        id: currentTripId,
         dropoffLocation: currentTrip.dropoffLocation,
         pickupLocation: currentTrip.pickupLocation,
         estimatedFare: currentTrip.estimatedFare,
         createdAt: new Date().toISOString(),
-        customerName: currentTrip.customerName
+        customerName: currentTrip.customerName,
+        status: 'COMPLETED',
+        paymentMethod: currentTrip.paymentMethod || 'CASH',
+        distance: currentTrip.distance
       };
-      await AsyncStorage.setItem('driver_completed_jobs', JSON.stringify([newJob, ...jobs]));
+      const jobsWithoutDuplicate = jobs.filter((job: any) => String(job?.id ?? '') !== currentTripId);
+      await AsyncStorage.setItem('driver_completed_jobs', JSON.stringify([newJob, ...jobsWithoutDuplicate]));
 
       // Update local driver earnings (70% driver share, 30% platform fee)
       const existingEarnings = await AsyncStorage.getItem('driver_earnings');
       const currentEarnings = existingEarnings ? parseFloat(existingEarnings) : 0;
       const driverEarning = currentTrip.estimatedFare * 0.70;
-      await AsyncStorage.setItem('driver_earnings', (currentEarnings + driverEarning).toString());
+      const alreadyStored = jobs.some((job: any) => String(job?.id ?? '') === currentTripId);
+      if (!alreadyStored) {
+        await AsyncStorage.setItem('driver_earnings', (currentEarnings + driverEarning).toString());
+      }
     } catch (storageError) {
       console.log('Failed to save simulated earnings:', storageError);
     }
 
     setTripState('COMPLETED_SUCCESS');
+    setCompletingTrip(false);
   };
 
   return (
@@ -606,7 +617,7 @@ export default function DriverHomeScreen() {
             <Text style={styles.driverName}>{driverName}</Text>
           </View>
         </View>
-        
+
         {/* Toggle Switch */}
         <View style={styles.onlineToggleWrapper}>
           <Text style={[styles.toggleText, isOnline ? styles.textOnline : styles.textOffline]}>
@@ -633,6 +644,7 @@ export default function DriverHomeScreen() {
               tripState={tripState}
               routeCoordinates={routeCoordinates}
               driverLocation={driverLocation}
+              isOnline={isOnline}
             />
 
             {/* Float Cards Over Map */}
@@ -680,7 +692,7 @@ export default function DriverHomeScreen() {
                     <View style={styles.addressCol}>
                       <Text style={styles.addressTitle}>Điểm đón:</Text>
                       <Text style={styles.addressText} numberOfLines={1}>{currentTrip.pickupLocation}</Text>
-                      
+
                       <Text style={[styles.addressTitle, { marginTop: 10 }]}>Điểm trả:</Text>
                       <Text style={styles.addressText} numberOfLines={1}>{currentTrip.dropoffLocation}</Text>
                     </View>
@@ -732,9 +744,9 @@ export default function DriverHomeScreen() {
                   backgroundColor: tripState === 'ACCEPTED' ? '#F59E0B' : tripState === 'ARRIVED' ? '#6366F1' : '#10B981'
                 }]}>
                   <Text style={styles.activeStatusText}>
-                    {tripState === 'ACCEPTED' ? 'Đang di chuyển tới điểm đón' : 
-                     tripState === 'ARRIVED' ? 'Đã đến điểm đón - Chờ khách lên xe' : 
-                     'Đang chở khách đến điểm đến'}
+                    {tripState === 'ACCEPTED' ? 'Đang di chuyển tới điểm đón' :
+                      tripState === 'ARRIVED' ? 'Đã đến điểm đón - Chờ khách lên xe' :
+                        'Đang chở khách đến điểm đến'}
                   </Text>
                 </View>
 
@@ -798,9 +810,15 @@ export default function DriverHomeScreen() {
                   )}
 
                   {tripState === 'IN_PROGRESS' && (
-                    <TouchableOpacity style={[styles.progressButton, { backgroundColor: '#6366F1' }]} onPress={handleCompleteTrip}>
+                    <TouchableOpacity
+                      style={[styles.progressButton, { backgroundColor: '#6366F1', opacity: completingTrip ? 0.7 : 1 }]}
+                      onPress={handleCompleteTrip}
+                      disabled={completingTrip}
+                    >
                       <CheckCircle2 size={20} color="#FFF" />
-                      <Text style={styles.progressButtonText}>HOÀN THÀNH CHUYẾN ĐI</Text>
+                      <Text style={styles.progressButtonText}>
+                        {completingTrip ? 'ĐANG HOÀN THÀNH...' : 'HOÀN THÀNH CHUYẾN ĐI'}
+                      </Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -813,7 +831,7 @@ export default function DriverHomeScreen() {
                   <Check size={36} color="#FFF" />
                 </View>
                 <Text style={styles.successTitle}>CHUYẾN ĐI HOÀN THÀNH!</Text>
-                
+
                 <View style={styles.successSummaryBox}>
                   <View style={styles.successSummaryRow}>
                     <Text style={styles.successSummaryLabel}>Tổng tiền khách trả:</Text>
