@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Switch, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Navigation, MapPin, Play, CheckCircle2, Navigation2, Check, X, Shield, Phone, MessageSquare } from 'lucide-react-native';
@@ -7,6 +7,8 @@ import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useNavigation } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
+import { useDriverRideSocket } from '@/hooks/useDriverRideSocket';
+import { useDriverLocation } from '@/hooks/useDriverLocation';
 
 const isRoomUpdateForRide = (payload: any, rideId?: string) => {
   if (!rideId) return true;
@@ -41,17 +43,32 @@ const calculateHaversineDistance = (lat1: number, lon1: number, lat2: number, lo
   return d;
 };
 
-// Pre-seeded high-fidelity route coordinates from Gò Vấp (IUH) to District 1 (Notre Dame Cathedral)
-const routeCoordinates = [
-  { latitude: 10.8220, longitude: 106.6870 }, // 1. 12 Nguyễn Văn Bảo (IUH Entrance)
-  { latitude: 10.8210, longitude: 106.6830 }, // 2. Nguyễn Văn Bảo & Nguyễn Kiệm junction
-  { latitude: 10.8140, longitude: 106.6780 }, // 3. Nguyễn Kiệm (Gia Định Park)
-  { latitude: 10.8030, longitude: 106.6760 }, // 4. Phú Nhuận Intersection (Hoàng Văn Thụ)
-  { latitude: 10.7930, longitude: 106.6810 }, // 5. Trần Huy Liệu & Nam Kỳ Khởi Nghĩa
-  { latitude: 10.7900, longitude: 106.6840 }, // 6. Nam Kỳ Khởi Nghĩa (Cầu Công Lý bridge)
-  { latitude: 10.7850, longitude: 106.6900 }, // 7. Nam Kỳ Khởi Nghĩa & Điện Biên Phủ
-  { latitude: 10.7790, longitude: 106.6990 }  // 8. Nhà thờ Đức Bà, Quận 1 (Notre Dame Cathedral)
-];
+// Mapbox Directions API — fetch real driving route between two points
+const MAPBOX_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_API_KEY || '';
+async function fetchRoute(from: { latitude: number; longitude: number }, to: { latitude: number; longitude: number }): Promise<Array<{ latitude: number; longitude: number }>> {
+  if (!MAPBOX_TOKEN) {
+    console.warn('[Route] No MAPBOX_TOKEN — cannot fetch directions');
+    return [];
+  }
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${from.longitude},${from.latitude};${to.longitude},${to.latitude}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
+  try {
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.routes && json.routes.length > 0) {
+      const coords = json.routes[0].geometry.coordinates.map((c: number[]) => ({
+        latitude: c[1],
+        longitude: c[0],
+      }));
+      console.log('[Route] fetched', coords.length, 'points from Mapbox Directions');
+      return coords;
+    }
+    console.warn('[Route] No routes found in Mapbox response');
+    return [];
+  } catch (err) {
+    console.warn('[Route] Mapbox Directions fetch failed:', err);
+    return [];
+  }
+}
 
 export default function DriverHomeScreen() {
   const router = useRouter();
@@ -61,12 +78,12 @@ export default function DriverHomeScreen() {
   const [loading, setLoading] = useState(false);
   const [driverName, setDriverName] = useState('Tài xế');
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
-
   // Trip Simulation State Machine
   // States: 'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'
   const [tripState, setTripState] = useState<'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'>('IDLE');
   const [countdown, setCountdown] = useState(15);
   const [currentTrip, setCurrentTrip] = useState<any>(null);
+  const [routeCoordinates, setRouteCoordinates] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const [completingTrip, setCompletingTrip] = useState(false);
 
   useEffect(() => {
@@ -91,6 +108,15 @@ export default function DriverHomeScreen() {
       console.log('Error modifying tab bar style:', e);
     }
   }, [tripState, navigation]);
+  // Real GPS location management (permission, watcher, heartbeat)
+  const hasActiveRide = tripState === 'ACCEPTED' || tripState === 'ARRIVED' || tripState === 'IN_PROGRESS';
+  const { driverLocation, getCurrentPosition } = useDriverLocation(isOnline, hasActiveRide);
+
+  // P0-02: GPS streaming via ride socket (port 9095) during active rides
+  useDriverRideSocket({
+    rideId: hasActiveRide && currentTrip?.id ? currentTrip.id : null,
+    isActive: hasActiveRide && !!currentTrip?.id,
+  });
 
   // Load Driver Name on mount
   useEffect(() => {
@@ -104,8 +130,10 @@ export default function DriverHomeScreen() {
         if (res.data && res.data.result) {
           const profile = res.data.result;
           setDriverName(profile.fullName || name);
+          // Capture verification status — driver must be APPROVED to go ONLINE
           if (profile.verificationStatus) {
             setVerificationStatus(profile.verificationStatus);
+            console.log('[DEBUG] Driver verification status:', profile.verificationStatus);
           }
         }
       } catch (err) {
@@ -175,8 +203,13 @@ export default function DriverHomeScreen() {
             estimatedFare: ride.estimatedFare || ride.fareAmount || 35000,
             paymentMethod: ride.paymentMethod || 'CASH',
             vehicleType: ride.vehicleType || ride.vehicleTier || 'CAR4',
-            distance: `${distanceVal.toFixed(1)} km`,
-            time: `${durationVal} phút`,
+            distance: ride.distanceKm ? `${ride.distanceKm.toFixed(1)} km` : `${distanceVal.toFixed(1)} km`,
+            time: ride.durationMinutes ? `${ride.durationMinutes} phút` : `${durationVal} phút`,
+            // Real coordinates from backend DriverCurrentRideResponse
+            pickupLatitude: ride.pickupLocation?.lat ?? null,
+            pickupLongitude: ride.pickupLocation?.lng ?? null,
+            dropoffLatitude: ride.destinationLocation?.lat ?? null,
+            dropoffLongitude: ride.destinationLocation?.lng ?? null,
           };
 
           setCurrentTrip(mappedTrip);
@@ -264,13 +297,58 @@ export default function DriverHomeScreen() {
     return () => clearInterval(timer);
   }, [tripState, countdown]);
 
+  // Fetch real driving route from Mapbox Directions API based on trip state
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadRoute = async () => {
+      if (!currentTrip) {
+        setRouteCoordinates([]);
+        return;
+      }
+
+      const pickupCoords = currentTrip.pickupLatitude && currentTrip.pickupLongitude
+        ? { latitude: currentTrip.pickupLatitude, longitude: currentTrip.pickupLongitude }
+        : null;
+      const dropoffCoords = currentTrip.dropoffLatitude && currentTrip.dropoffLongitude
+        ? { latitude: currentTrip.dropoffLatitude, longitude: currentTrip.dropoffLongitude }
+        : null;
+
+      if (tripState === 'ACCEPTED' || tripState === 'ARRIVED') {
+        // Driver heading to pickup → route from driverLocation to pickup
+        if (driverLocation && pickupCoords) {
+          console.log('[Route] fetching driver→pickup route');
+          const coords = await fetchRoute(driverLocation, pickupCoords);
+          if (!cancelled) setRouteCoordinates(coords);
+        } else {
+          if (!cancelled) setRouteCoordinates([]);
+        }
+      } else if (tripState === 'IN_PROGRESS') {
+        // Trip in progress → route from pickup to dropoff
+        if (pickupCoords && dropoffCoords) {
+          console.log('[Route] fetching pickup→dropoff route');
+          const coords = await fetchRoute(pickupCoords, dropoffCoords);
+          if (!cancelled) setRouteCoordinates(coords);
+        } else {
+          if (!cancelled) setRouteCoordinates([]);
+        }
+      } else {
+        // IDLE, PROPOSAL, COMPLETED_SUCCESS → clear route
+        if (!cancelled) setRouteCoordinates([]);
+      }
+    };
+
+    loadRoute();
+
+    return () => { cancelled = true; };
+  }, [tripState, currentTrip, driverLocation]);
+
   const toggleOnline = async (value: boolean) => {
     setLoading(true);
     try {
       let currentStatus = verificationStatus;
-
       if (value) {
-        // Fetch the fresh profile from driver-service to check real status
+        // ── Re-check fresh profile status before going ONLINE ──
         try {
           const res = await api.get('/api/drivers/me/profile');
           if (res.data && res.data.result) {
@@ -283,61 +361,86 @@ export default function DriverHomeScreen() {
         } catch (profileErr) {
           console.log('Failed to fetch fresh profile status, falling back to state:', profileErr);
         }
-      }
 
-      if (value && currentStatus !== 'APPROVED') {
-        Alert.alert(
-          'Tài khoản chưa được duyệt',
-          'Bạn cần vào tab Tài khoản và bấm Kích hoạt tài khoản để backend chuyển trạng thái sang APPROVED trước khi bật Online.'
-        );
-        setLoading(false);
-        return;
-      }
-
-      // Sync availability with backend driver-service matching Spring DTO
-      await api.patch('/api/drivers/me/availability', {
-        availabilityStatus: value ? 'ONLINE' : 'OFFLINE',
-        currentLatitude: 10.822, // Simulated IUH campus coordinates
-        currentLongitude: 106.687
-      });
-
-      if (value) {
-        // Sync coordinates with Redis GEO key (driver:locations) owned by ride-service
-        const driverId = await AsyncStorage.getItem('user_id');
-        if (driverId) {
-          try {
-            await api.post('/api/v1/rides/location', {
-              driverId: driverId,
-              lat: 10.822,
-              lng: 106.687
-            });
-            console.log('Successfully synchronized GPS location with Redis GEO (ride-service)');
-          } catch (geoError: any) {
-            console.log('Failed to sync Redis GEO location:', geoError.message || geoError);
-          }
+        // ── Guard: driver must be APPROVED before going ONLINE ──
+        if (currentStatus !== 'APPROVED') {
+          Alert.alert(
+            'Tài khoản chưa được duyệt',
+            `Trạng thái hồ sơ: ${currentStatus}. Bạn cần được admin duyệt (APPROVED) trước khi có thể bật Online nhận khách.`,
+            [{ text: 'OK' }]
+          );
+          setLoading(false);
+          return;
         }
-      }
 
-      setIsOnline(value);
-      if (!value) {
+        // Going ONLINE: get real GPS coordinates before sending availability
+        const coords = await getCurrentPosition();
+        if (!coords) {
+          // GPS permission denied or unavailable — do NOT go online with fake coords
+          Alert.alert(
+            'Không thể bật Online',
+            'Cần quyền truy cập vị trí để bật chế độ nhận khách. Vui lòng cấp quyền vị trí trong Cài đặt.',
+            [{ text: 'OK' }]
+          );
+          setLoading(false);
+          return;
+        }
+
+        // PATCH /api/drivers/me/availability — backend saves to PG + Redis GEO
+        // DTO: { availabilityStatus: "ONLINE", currentLatitude, currentLongitude }
+        const requestBody = {
+          availabilityStatus: 'ONLINE',
+          currentLatitude: coords.latitude,
+          currentLongitude: coords.longitude,
+        };
+        console.log('[DEBUG] PATCH /api/drivers/me/availability →', JSON.stringify(requestBody));
+        const response = await api.patch('/api/drivers/me/availability', requestBody);
+        console.log('[DEBUG] availability response status:', response.status, 'data:', JSON.stringify(response.data));
+
+        // Only set ONLINE locally after backend confirms success
+        setIsOnline(true);
+      } else {
+        // Going OFFLINE: send OFFLINE status (coords not required but send current for consistency)
+        const requestBody = {
+          availabilityStatus: 'OFFLINE',
+          currentLatitude: driverLocation?.latitude ?? 0,
+          currentLongitude: driverLocation?.longitude ?? 0,
+        };
+        console.log('[DEBUG] PATCH /api/drivers/me/availability →', JSON.stringify(requestBody));
+        const response = await api.patch('/api/drivers/me/availability', requestBody);
+        console.log('[DEBUG] availability response status:', response.status, 'data:', JSON.stringify(response.data));
+
+        setIsOnline(false);
         setTripState('IDLE');
       }
     } catch (error: any) {
-      console.log('Failed to sync availability with server:', error.message || error);
-      let errorMsg = 'Không thể cập nhật trạng thái hoạt động với máy chủ.';
-      if (error.response?.status === 403) {
-        errorMsg = 'Backend từ chối bật Online. Hãy kiểm tra lại hồ sơ tài xế đã được APPROVED và đã chọn đúng loại xe CAR4.';
-      }
-      if (error.response?.data?.message) {
-        errorMsg = error.response.data.message;
-      } else if (error.message) {
-        errorMsg = error.message;
-      }
-      Alert.alert('Lỗi kết nối', errorMsg);
+      const status = error?.response?.status;
+      const serverMsg = error?.response?.data?.message || error?.message;
+      console.log('[DEBUG] availability FAILED — status:', status, 'message:', serverMsg);
+      console.log('[DEBUG] Full error response:', JSON.stringify(error?.response?.data));
 
-      // Revert the toggle state
-      setIsOnline(false);
-      setTripState('IDLE');
+      // Do NOT set isOnline locally when server rejects — this prevents
+      // the cascading 400 on heartbeat (heartbeat fires because isOnline=true
+      // but backend still has availabilityStatus=OFFLINE/PENDING)
+      if (status === 403) {
+        Alert.alert(
+          'Không thể bật Online',
+          `Server trả về 403: ${serverMsg}. Tài khoản có thể chưa được duyệt hoặc đã bị khóa.`,
+          [{ text: 'OK' }]
+        );
+      } else if (value) {
+        // Going ONLINE failed — show error, do NOT set isOnline=true
+        Alert.alert(
+          'Lỗi kết nối',
+          `Không thể đồng bộ trạng thái Online: ${serverMsg || 'Lỗi không xác định'}`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        // Going OFFLINE failed — still set local state to OFFLINE for safety
+        // (driver wants to stop, we should honor that locally)
+        setIsOnline(false);
+        setTripState('IDLE');
+      }
     } finally {
       setLoading(false);
     }
@@ -371,35 +474,66 @@ export default function DriverHomeScreen() {
   };
 
   const handleArriveAtPickup = async () => {
+    if (!currentTrip?.id) return;
+    const coords = driverLocation ?? await getCurrentPosition();
+    const lat = coords?.latitude ?? 0;
+    const lng = coords?.longitude ?? 0;
     try {
+      // P0-01 FIX: PRIMARY — call ride-service lifecycle endpoint (triggers Kafka ride.arrived → notification-service)
       await api.post(`/api/v1/rides/${currentTrip.id}/arrive`);
+      // SECONDARY — update driver-service local state for DriverProfile consistency
       try {
         await api.patch('/api/drivers/me/rides/current', {
-          rideStatus: 'ARRIVED_PICKUP'
+          rideStatus: 'EN_ROUTE_PICKUP',
+          currentLatitude: lat,
+          currentLongitude: lng
         });
-      } catch (err: any) {
-        console.log('Failed to patch driver status to ARRIVED_PICKUP:', err.message || err);
+      } catch (driverSvcErr: any) {
+        console.log('Driver-service local update failed (non-critical):', driverSvcErr.message);
       }
       setTripState('ARRIVED');
     } catch (e: any) {
-      console.log('Failed to notify arrival on server:', e.message || e);
+      console.log('Ride-service arrive failed:', e.message || e);
+      // Fallback: still try driver-service local state so UI doesn't break
+      try {
+        await api.patch('/api/drivers/me/rides/current', {
+          rideStatus: 'EN_ROUTE_PICKUP',
+          currentLatitude: lat,
+          currentLongitude: lng
+        });
+      } catch (_) { /* ignore fallback error */ }
       setTripState('ARRIVED');
     }
   };
 
   const handleStartTrip = async () => {
+    if (!currentTrip?.id) return;
+    const coords = driverLocation ?? await getCurrentPosition();
+    const lat = coords?.latitude ?? 0;
+    const lng = coords?.longitude ?? 0;
     try {
+      // P0-01 FIX: PRIMARY — call ride-service lifecycle endpoint (triggers Kafka ride.started → notification-service)
       await api.post(`/api/v1/rides/${currentTrip.id}/start`);
+      // SECONDARY — update driver-service local state
       try {
         await api.patch('/api/drivers/me/rides/current', {
-          rideStatus: 'IN_PROGRESS'
+          rideStatus: 'IN_PROGRESS',
+          currentLatitude: lat,
+          currentLongitude: lng
         });
-      } catch (err: any) {
-        console.log('Failed to patch driver status to IN_PROGRESS:', err.message || err);
+      } catch (driverSvcErr: any) {
+        console.log('Driver-service local update failed (non-critical):', driverSvcErr.message);
       }
       setTripState('IN_PROGRESS');
     } catch (e: any) {
-      console.log('Failed to start trip on server:', e.message || e);
+      console.log('Ride-service start failed:', e.message || e);
+      try {
+        await api.patch('/api/drivers/me/rides/current', {
+          rideStatus: 'IN_PROGRESS',
+          currentLatitude: lat,
+          currentLongitude: lng
+        });
+      } catch (_) { /* ignore fallback error */ }
       setTripState('IN_PROGRESS');
     }
   };
@@ -408,17 +542,31 @@ export default function DriverHomeScreen() {
     if (completingTrip || !currentTrip?.id) return;
     setCompletingTrip(true);
     try {
+      // P0-01 FIX: PRIMARY — call ride-service lifecycle endpoint (triggers Kafka ride.completed → notification-service + booking-service)
       await api.post(`/api/v1/rides/${currentTrip.id}/complete`, {
         finalFare: currentTrip.estimatedFare,
-        paymentMethod: currentTrip.paymentMethod || 'CASH'
+        paymentMethod: currentTrip.paymentMethod || 'CASH',
       });
+      // SECONDARY — update driver-service local state
       try {
-        await api.post('/api/drivers/me/rides/current/complete');
-      } catch (err: any) {
-        console.log('Failed to post driver complete:', err.message || err);
+        const distanceVal = parseFloat(currentTrip.distance) || 5.0;
+        await api.post('/api/drivers/me/rides/current/complete', {
+          fareAmount: currentTrip.estimatedFare,
+          distanceKm: distanceVal
+        });
+      } catch (driverSvcErr: any) {
+        console.log('Driver-service local complete failed (non-critical):', driverSvcErr.message);
       }
     } catch (e: any) {
-      console.log('Failed to complete trip on server:', e.message || e);
+      console.log('Ride-service complete failed:', e.message || e);
+      // Fallback: still try driver-service local state
+      try {
+        const distanceVal = parseFloat(currentTrip.distance) || 5.0;
+        await api.post('/api/drivers/me/rides/current/complete', {
+          fareAmount: currentTrip.estimatedFare,
+          distanceKm: distanceVal
+        });
+      } catch (_) { /* ignore fallback error */ }
     }
 
     // Save to local storage driver-jobs list so it populates jobs.tsx!
@@ -495,6 +643,7 @@ export default function DriverHomeScreen() {
               currentTrip={currentTrip}
               tripState={tripState}
               routeCoordinates={routeCoordinates}
+              driverLocation={driverLocation}
               isOnline={isOnline}
             />
 
