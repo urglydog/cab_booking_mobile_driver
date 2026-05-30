@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Switch, ScrollView } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Switch, ScrollView, AppState, AppStateStatus } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Navigation, MapPin, Play, CheckCircle2, Navigation2, Check, X, Shield, Phone, MessageSquare } from 'lucide-react-native';
 import DriverMap from '@/components/DriverMap';
@@ -76,6 +76,7 @@ export default function DriverHomeScreen() {
   const { socket } = useSocket();
   const [isOnline, setIsOnline] = useState(false);
   const [loading, setLoading] = useState(false);
+  const isOnlineRef = useRef(false);
   const [driverName, setDriverName] = useState('Tài xế');
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
   // Trip Simulation State Machine
@@ -85,6 +86,10 @@ export default function DriverHomeScreen() {
   const [currentTrip, setCurrentTrip] = useState<any>(null);
   const [routeCoordinates, setRouteCoordinates] = useState<Array<{ latitude: number; longitude: number }>>([]);
   const [completingTrip, setCompletingTrip] = useState(false);
+
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
 
   useEffect(() => {
     const isActiveTrip = tripState === 'ACCEPTED' || tripState === 'ARRIVED' || tripState === 'IN_PROGRESS';
@@ -111,6 +116,37 @@ export default function DriverHomeScreen() {
   // Real GPS location management (permission, watcher, heartbeat)
   const hasActiveRide = tripState === 'ACCEPTED' || tripState === 'ARRIVED' || tripState === 'IN_PROGRESS';
   const { driverLocation, getCurrentPosition } = useDriverLocation(isOnline, hasActiveRide);
+
+  const sendOfflineStatus = useCallback(async () => {
+    if (!isOnlineRef.current) return;
+    const requestBody = {
+      availabilityStatus: 'OFFLINE',
+      currentLatitude: driverLocation?.latitude ?? 0,
+      currentLongitude: driverLocation?.longitude ?? 0,
+    };
+    try {
+      console.log('[DEBUG] PATCH /api/drivers/me/availability (app background) →', JSON.stringify(requestBody));
+      await api.patch('/api/drivers/me/availability', requestBody);
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const serverMsg = error?.response?.data?.message || error?.message;
+      console.log('[DEBUG] background OFFLINE FAILED — status:', status, 'message:', serverMsg);
+    }
+
+    setIsOnline(false);
+    setTripState('IDLE');
+  }, [driverLocation]);
+
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'inactive' || nextState === 'background') {
+        sendOfflineStatus();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [sendOfflineStatus]);
 
   // P0-02: GPS streaming via ride socket (port 9095) during active rides
   useDriverRideSocket({
