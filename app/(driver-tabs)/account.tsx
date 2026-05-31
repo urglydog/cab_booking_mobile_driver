@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, Modal, TextInput, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { User, LogOut, Shield, PhoneCall, CreditCard, ChevronRight, Car, Bike, AlertTriangle, CheckCircle2 } from 'lucide-react-native';
+import { User, LogOut, Shield, PhoneCall, CreditCard, ChevronRight, Car, Bike, AlertTriangle, CheckCircle2, Check, X } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect } from 'expo-router';
 import api from '@/services/api';
+import { changeDriverPassword, updateDriverProfile } from '@/features/auth/services/authApi';
 
 export default function DriverAccountScreen() {
   const router = useRouter();
@@ -12,7 +13,18 @@ export default function DriverAccountScreen() {
   const [driverPhone, setDriverPhone] = useState('090 123 4567');
   const [vehicleInfo, setVehicleInfo] = useState('Chưa kích hoạt');
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
+  const [accountStatus, setAccountStatus] = useState<'ACTIVE' | 'SUSPENDED' | 'PENDING_DELETION' | 'DELETED'>('ACTIVE');
   const [stats, setStats] = useState({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
+  const [profileData, setProfileData] = useState<any>(null);
+  const [isProfileModalVisible, setIsProfileModalVisible] = useState(false);
+  const [editDriverName, setEditDriverName] = useState('');
+  const [editDriverPhone, setEditDriverPhone] = useState('');
+  const [profileSaveLoading, setProfileSaveLoading] = useState(false);
+  const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
 
   const fetchStats = async () => {
     try {
@@ -63,12 +75,16 @@ export default function DriverAccountScreen() {
         if (res.data && res.data.result) {
           profileFetched = true;
           const profile = res.data.result;
+          setProfileData(profile);
           setDriverName(profile.fullName || name);
           if (profile.phoneNumber) setDriverPhone(profile.phoneNumber);
+          if (profile.accountStatus) setAccountStatus(profile.accountStatus);
           if (profile.verificationStatus) {
             setVerificationStatus(profile.verificationStatus);
           }
-          if (profile.verificationStatus === 'APPROVED' && profile.vehiclePlate) {
+          if (profile.accountStatus === 'SUSPENDED') {
+            setVehicleInfo('Tài khoản đã bị chặn');
+          } else if (profile.verificationStatus === 'APPROVED' && profile.vehiclePlate) {
             let typeLabel = 'Xe 4 chỗ';
             if (profile.vehicleType === 'BIKE') typeLabel = 'Xe máy';
             else if (profile.vehicleType === 'CAR7') typeLabel = 'Xe 7 chỗ';
@@ -98,6 +114,79 @@ export default function DriverAccountScreen() {
     }, [])
   );
 
+  const handleOpenProfileEdit = () => {
+    setEditDriverName(driverName);
+    setEditDriverPhone(driverPhone);
+    setIsProfileModalVisible(true);
+  };
+
+  const handleSaveProfile = async () => {
+    if (!editDriverName.trim()) {
+      Alert.alert('Lỗi', 'Họ tên không được để trống.');
+      return;
+    }
+    if (!profileData) {
+      Alert.alert('Lỗi', 'Không tìm thấy thông tin hồ sơ để cập nhật.');
+      return;
+    }
+
+    setProfileSaveLoading(true);
+    try {
+      const updatedProfile = await updateDriverProfile({
+        fullName: editDriverName.trim(),
+        email: profileData.email,
+        phoneNumber: editDriverPhone.trim(),
+        avatarUrl: profileData.avatarUrl,
+        licenseNumber: profileData.licenseNumber,
+        vehicleType: profileData.vehicleType,
+        vehiclePlate: profileData.vehiclePlate,
+        vehicleModel: profileData.vehicleModel,
+        vehicleColor: profileData.vehicleColor,
+        serviceArea: profileData.serviceArea,
+        externalUserId: profileData.externalUserId,
+      });
+
+      const nextProfile = updatedProfile || profileData;
+      setProfileData(nextProfile);
+      setDriverName(nextProfile.fullName || editDriverName.trim());
+      setDriverPhone(nextProfile.phoneNumber || editDriverPhone.trim());
+      await AsyncStorage.setItem('user_name', nextProfile.fullName || editDriverName.trim());
+      await AsyncStorage.setItem('user_phone', nextProfile.phoneNumber || editDriverPhone.trim());
+
+      setIsProfileModalVisible(false);
+      Alert.alert('Thành công', 'Đã cập nhật thông tin tài xế.');
+    } catch (error: any) {
+      Alert.alert('Lỗi', error.response?.data?.message || 'Không thể cập nhật thông tin tài xế.');
+    } finally {
+      setProfileSaveLoading(false);
+    }
+  };
+
+  const handleSavePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      Alert.alert('Lỗi', 'Vui lòng nhập đầy đủ thông tin mật khẩu.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Lỗi', 'Mật khẩu nhập lại không khớp.');
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      await changeDriverPassword({ currentPassword, newPassword });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setIsPasswordModalVisible(false);
+      Alert.alert('Thành công', 'Đã đổi mật khẩu thành công.');
+    } catch (error: any) {
+      Alert.alert('Lỗi', error.response?.data?.message || 'Không thể đổi mật khẩu.');
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     Alert.alert(
       'Đăng xuất',
@@ -117,7 +206,7 @@ export default function DriverAccountScreen() {
               //   - driver:available:locations (GEO entry)
               // Prevents stale GEO data from matching with wrong vehicle type after re-login.
               try {
-                await api.put('/api/drivers/me/availability', {
+                await api.patch('/api/drivers/me/availability', {
                   availabilityStatus: 'OFFLINE',
                   currentLatitude: null,
                   currentLongitude: null,
@@ -227,6 +316,18 @@ export default function DriverAccountScreen() {
           </View>
         )}
 
+        {accountStatus === 'SUSPENDED' && (
+          <View style={styles.blockedCard}>
+            <View style={styles.kycHeader}>
+              <Shield size={20} color="#DC2626" />
+              <Text style={styles.blockedTitle}>TÀI KHOẢN ĐÃ BỊ CHẶN</Text>
+            </View>
+            <Text style={styles.blockedDesc}>
+              Admin đã chặn tài khoản này. Bạn không thể bật Online hoặc nhận chuyến cho đến khi được mở chặn.
+            </Text>
+          </View>
+        )}
+
         {/* Vehicle Information */}
         <Text style={[styles.sectionTitle, { marginTop: 16 }]}>Phương tiện đăng ký</Text>
         <View style={styles.vehicleCard}>
@@ -248,10 +349,18 @@ export default function DriverAccountScreen() {
         {/* Menu Items */}
         <Text style={styles.sectionTitle}>Cài đặt tài khoản</Text>
         <View style={styles.menuContainer}>
-          <TouchableOpacity style={styles.menuItem} onPress={() => Alert.alert('Thông báo', 'Tính năng Hồ sơ cá nhân & Xác thực đang được phát triển.')}>
+          <TouchableOpacity style={styles.menuItem} onPress={handleOpenProfileEdit}>
             <View style={styles.menuItemLeft}>
               <User size={18} color="#4B5563" />
-              <Text style={styles.menuItemText}>Hồ sơ cá nhân & Xác thực</Text>
+              <Text style={styles.menuItemText}>Hồ sơ cá nhân</Text>
+            </View>
+            <ChevronRight size={16} color="#9CA3AF" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => setIsPasswordModalVisible(true)}>
+            <View style={styles.menuItemLeft}>
+              <Shield size={18} color="#4B5563" />
+              <Text style={styles.menuItemText}>Đổi mật khẩu</Text>
             </View>
             <ChevronRight size={16} color="#9CA3AF" />
           </TouchableOpacity>
@@ -293,6 +402,119 @@ export default function DriverAccountScreen() {
         </View>
 
       </ScrollView>
+
+      <Modal
+        visible={isProfileModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsProfileModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setIsProfileModalVisible(false)} style={styles.closeBtn}>
+                <X size={24} color="#374151" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Chỉnh sửa hồ sơ</Text>
+              <TouchableOpacity onPress={handleSaveProfile} style={styles.saveBtn} disabled={profileSaveLoading}>
+                <Check size={24} color="#6366F1" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalScroll}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Họ và tên</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nhập họ và tên"
+                  placeholderTextColor="#9CA3AF"
+                  value={editDriverName}
+                  onChangeText={setEditDriverName}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Số điện thoại</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nhập số điện thoại"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="phone-pad"
+                  value={editDriverPhone}
+                  onChangeText={setEditDriverPhone}
+                />
+              </View>
+
+              <TouchableOpacity style={styles.saveActionButton} onPress={handleSaveProfile} disabled={profileSaveLoading} activeOpacity={0.8}>
+                <Text style={styles.saveActionButtonText}>{profileSaveLoading ? 'Đang lưu...' : 'Lưu thay đổi'}</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={isPasswordModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsPasswordModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setIsPasswordModalVisible(false)} style={styles.closeBtn}>
+                <X size={24} color="#374151" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Đổi mật khẩu</Text>
+              <TouchableOpacity onPress={handleSavePassword} style={styles.saveBtn} disabled={passwordLoading}>
+                <Check size={24} color="#6366F1" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalScroll}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Mật khẩu hiện tại</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nhập mật khẩu hiện tại"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Mật khẩu mới</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nhập mật khẩu mới"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Nhập lại mật khẩu mới</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nhập lại mật khẩu mới"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                />
+              </View>
+
+              <TouchableOpacity style={styles.saveActionButton} onPress={handleSavePassword} disabled={passwordLoading} activeOpacity={0.8}>
+                <Text style={styles.saveActionButtonText}>{passwordLoading ? 'Đang lưu...' : 'Đổi mật khẩu'}</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -524,6 +746,14 @@ const styles = StyleSheet.create({
     borderColor: '#10B981',
     marginBottom: 16,
   },
+  blockedCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#DC2626',
+    marginBottom: 16,
+  },
   approvedKycTitle: {
     fontSize: 12,
     fontWeight: '800',
@@ -535,5 +765,88 @@ const styles = StyleSheet.create({
     color: '#047857',
     fontWeight: '500',
     lineHeight: 18,
+  },
+  blockedTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#B91C1C',
+    letterSpacing: 0.5,
+  },
+  blockedDesc: {
+    fontSize: 12,
+    color: '#991B1B',
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '85%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  closeBtn: {
+    padding: 4,
+  },
+  saveBtn: {
+    padding: 4,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#1F2937',
+  },
+  modalScroll: {
+    padding: 24,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#4B5563',
+    marginBottom: 8,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  textInput: {
+    backgroundColor: '#F9FAFB',
+    borderColor: '#E5E7EB',
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    height: 50,
+    fontSize: 15,
+    color: '#1F2937',
+  },
+  saveActionButton: {
+    backgroundColor: '#6366F1',
+    height: 54,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  saveActionButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });

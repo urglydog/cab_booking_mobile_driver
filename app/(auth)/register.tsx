@@ -40,6 +40,25 @@ export default function RegisterScreen() {
       }, { baseURL: GATEWAY_URL }); // Go via API Gateway
 
       if (response.status === 200 || response.status === 201) {
+        const authResult = response.data?.result;
+        if (authResult?.accessToken && authResult?.refreshToken && authResult?.user) {
+          await AsyncStorage.multiSet([
+            ['access_token', authResult.accessToken],
+            ['refresh_token', authResult.refreshToken],
+            ['user_id', String(authResult.user.userId)],
+            ['user_name', authResult.user.fullName || fullName],
+            ['user_role', authResult.user.role || role],
+            ['user_phone', authResult.user.phoneNumber || phoneNumber],
+            ['user_email', authResult.user.email || email],
+          ]);
+          await AsyncStorage.removeItem('@pending_registration_email');
+
+          Alert.alert('Thành công', 'Đăng ký tài khoản thành công!', [
+            { text: 'OK', onPress: () => router.replace('/(driver-tabs)') }
+          ]);
+          return;
+        }
+
         await AsyncStorage.setItem('@pending_registration_email', email);
 
         Alert.alert('Thành công', 'Đăng ký tài khoản thành công! Vui lòng đăng nhập.', [

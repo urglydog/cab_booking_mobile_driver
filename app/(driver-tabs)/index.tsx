@@ -79,6 +79,7 @@ export default function DriverHomeScreen() {
   const isOnlineRef = useRef(false);
   const [driverName, setDriverName] = useState('Tài xế');
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
+  const [accountStatus, setAccountStatus] = useState<'ACTIVE' | 'SUSPENDED' | 'PENDING_DELETION' | 'DELETED'>('ACTIVE');
   // Trip Simulation State Machine
   // States: 'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'
   const [tripState, setTripState] = useState<'IDLE' | 'PROPOSAL' | 'ACCEPTED' | 'ARRIVED' | 'IN_PROGRESS' | 'COMPLETED_SUCCESS'>('IDLE');
@@ -383,6 +384,7 @@ export default function DriverHomeScreen() {
     setLoading(true);
     try {
       let currentStatus = verificationStatus;
+      let currentAccountStatus = null as string | null;
       if (value) {
         // ── Re-check fresh profile status before going ONLINE ──
         try {
@@ -393,9 +395,23 @@ export default function DriverHomeScreen() {
               currentStatus = profile.verificationStatus;
               setVerificationStatus(profile.verificationStatus);
             }
+            if (profile.accountStatus) {
+              currentAccountStatus = profile.accountStatus;
+              setAccountStatus(profile.accountStatus);
+            }
           }
         } catch (profileErr) {
           console.log('Failed to fetch fresh profile status, falling back to state:', profileErr);
+        }
+
+        if (currentAccountStatus === 'SUSPENDED' || accountStatus === 'SUSPENDED') {
+          Alert.alert(
+            'Tài khoản đã bị chặn',
+            'Tài khoản tài xế của bạn đã bị admin chặn, không thể bật Online hoặc nhận chuyến nữa.',
+            [{ text: 'OK' }]
+          );
+          setLoading(false);
+          return;
         }
 
         // ── Guard: driver must be APPROVED before going ONLINE ──
@@ -459,9 +475,23 @@ export default function DriverHomeScreen() {
       // the cascading 400 on heartbeat (heartbeat fires because isOnline=true
       // but backend still has availabilityStatus=OFFLINE/PENDING)
       if (status === 403) {
+        const blockedMessage =
+          serverMsg?.toLowerCase().includes('blocked') ||
+          serverMsg?.toLowerCase().includes('disabled') ||
+          serverMsg?.toLowerCase().includes('chặn') ||
+          accountStatus === 'SUSPENDED';
+
         Alert.alert(
-          'Không thể bật Online',
-          `Server trả về 403: ${serverMsg}. Tài khoản có thể chưa được duyệt hoặc đã bị khóa.`,
+          blockedMessage ? 'Tài khoản đã bị chặn' : 'Không thể bật Online',
+          blockedMessage
+            ? 'Tài khoản của bạn đã bị admin chặn nên không thể bật Online hoặc nhận chuyến.'
+            : `Server trả về 403: ${serverMsg}. Tài khoản có thể chưa được duyệt hoặc đã bị khóa.`,
+          [{ text: 'OK' }]
+        );
+      } else if (status === 500 && accountStatus === 'SUSPENDED') {
+        Alert.alert(
+          'Tài khoản đã bị chặn',
+          'Tài khoản của bạn đã bị admin chặn nên không thể bật Online hoặc nhận chuyến.',
           [{ text: 'OK' }]
         );
       } else if (value) {
