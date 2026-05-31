@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import api, { GATEWAY_URL } from '@/services/api';
 
-export const AUTH_STORAGE_KEYS = ['access_token', 'refresh_token', 'user_id', 'user_name', 'user_role'];
+export const AUTH_STORAGE_KEYS = ['access_token', 'refresh_token', 'user_id', 'user_name', 'user_role', 'user_phone', 'user_email'];
 
 export const clearAuthStorage = async () => {
   await AsyncStorage.multiRemove(AUTH_STORAGE_KEYS);

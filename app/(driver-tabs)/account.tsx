@@ -117,7 +117,7 @@ export default function DriverAccountScreen() {
               //   - driver:available:locations (GEO entry)
               // Prevents stale GEO data from matching with wrong vehicle type after re-login.
               try {
-                await api.put('/api/drivers/me/availability', {
+                await api.patch('/api/drivers/me/availability', {
                   availabilityStatus: 'OFFLINE',
                   currentLatitude: null,
                   currentLongitude: null,
