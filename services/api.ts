@@ -1,5 +1,7 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Alert } from 'react-native';
+import { router } from 'expo-router';
 
 export const IP_ADDRESS = process.env.EXPO_PUBLIC_IP_ADDRESS || '192.168.1.57';
 export const GATEWAY_PORT = process.env.EXPO_PUBLIC_GATEWAY_PORT || '8080';
@@ -50,6 +52,32 @@ api.interceptors.request.use(
     return config;
   },
   (error) => Promise.reject(error)
+);
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const status = error?.response?.status;
+    if (status === 403) {
+      console.log('[DEBUG] Global API Interceptor: Received 403 Forbidden - potential block/ban');
+      try {
+        const token = await AsyncStorage.getItem('access_token');
+        if (token) {
+          // Force logout for blocked driver
+          await AsyncStorage.multiRemove(['access_token', 'user_id', 'user_role']);
+          Alert.alert(
+            'Tài khoản bị khóa',
+            'Tài khoản của bạn đã bị khóa, vui lòng liên hệ bộ phận hỗ trợ.',
+            [{ text: 'OK' }]
+          );
+          router.replace('/(auth)/login');
+        }
+      } catch (err) {
+        console.error('[DEBUG] Error during global 403 logout:', err);
+      }
+    }
+    return Promise.reject(error);
+  }
 );
 
 export default api;
