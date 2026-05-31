@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 import { clearAuthStorage, loginDriver } from '@/features/auth/services/authApi';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('');
+  const { prefillEmail } = useLocalSearchParams<{ prefillEmail?: string }>();
+  const [email, setEmail] = useState(prefillEmail ?? '');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -111,6 +112,10 @@ export default function LoginScreen() {
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log In</Text>}
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.forgotLink} onPress={() => router.push('/(auth)/forgot-password' as never)}>
+          <Text style={styles.forgotText}>Quên mật khẩu?</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.registerLink}
           onPress={() => router.push('/register')}
@@ -190,6 +195,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  forgotLink: {
+    marginTop: 18,
+    alignItems: 'center',
+  },
+  forgotText: {
+    color: '#475569',
+    fontSize: 14,
+    fontWeight: '700',
   },
   registerLink: {
     marginTop: 32,

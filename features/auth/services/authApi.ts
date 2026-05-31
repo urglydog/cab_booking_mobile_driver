@@ -22,6 +22,33 @@ export const changeDriverPassword = async (payload: { currentPassword: string; n
   return response.data.result;
 };
 
+export const requestForgotPasswordOtp = async (payload: { email: string }) => {
+  const response = await api.post('/api/auth/password/forgot/request-otp', payload, { baseURL: GATEWAY_URL });
+  return response.data.result;
+};
+
+export const resetForgotPassword = async (payload: { email: string; otpCode: string; newPassword: string }) => {
+  const response = await api.post('/api/auth/password/forgot/reset', payload, { baseURL: GATEWAY_URL });
+  return response.data.result;
+};
+
+export const updateDriverProfile = async (payload: {
+  fullName: string;
+  email?: string;
+  phoneNumber?: string;
+  avatarUrl?: string;
+  licenseNumber: string;
+  vehicleType: string;
+  vehiclePlate: string;
+  vehicleModel: string;
+  vehicleColor: string;
+  serviceArea?: string;
+  externalUserId?: string;
+}) => {
+  const response = await api.put('/api/drivers/me/profile', payload, { baseURL: GATEWAY_URL });
+  return response.data.result;
+};
+
 export const logoutDriver = async (refreshToken?: string | null) => {
   if (refreshToken) {
     try {
