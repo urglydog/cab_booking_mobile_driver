@@ -469,41 +469,22 @@ export default function DriverHomeScreen() {
       const status = error?.response?.status;
       const serverMsg = error?.response?.data?.message || error?.message;
       console.log('[DEBUG] availability FAILED — status:', status, 'message:', serverMsg);
-      console.log('[DEBUG] Full error response:', JSON.stringify(error?.response?.data));
 
-      // Do NOT set isOnline locally when server rejects — this prevents
-      // the cascading 400 on heartbeat (heartbeat fires because isOnline=true
-      // but backend still has availabilityStatus=OFFLINE/PENDING)
       if (status === 403) {
-        const blockedMessage =
-          serverMsg?.toLowerCase().includes('blocked') ||
-          serverMsg?.toLowerCase().includes('disabled') ||
-          serverMsg?.toLowerCase().includes('chặn') ||
-          accountStatus === 'SUSPENDED';
-
         Alert.alert(
-          blockedMessage ? 'Tài khoản đã bị chặn' : 'Không thể bật Online',
-          blockedMessage
-            ? 'Tài khoản của bạn đã bị admin chặn nên không thể bật Online hoặc nhận chuyến.'
-            : `Server trả về 403: ${serverMsg}. Tài khoản có thể chưa được duyệt hoặc đã bị khóa.`,
-          [{ text: 'OK' }]
-        );
-      } else if (status === 500 && accountStatus === 'SUSPENDED') {
-        Alert.alert(
-          'Tài khoản đã bị chặn',
-          'Tài khoản của bạn đã bị admin chặn nên không thể bật Online hoặc nhận chuyến.',
+          'Tài khoản bị khóa',
+          'Không thể bật trạng thái hoạt động vì một số lý do, vui lòng liên hệ bộ phận hỗ trợ',
           [{ text: 'OK' }]
         );
       } else if (value) {
         // Going ONLINE failed — show error, do NOT set isOnline=true
         Alert.alert(
-          'Lỗi kết nối',
-          `Không thể đồng bộ trạng thái Online: ${serverMsg || 'Lỗi không xác định'}`,
+          'Không thể bật trạng thái hoạt động',
+          'Không thể bật trạng thái hoạt động vì một số lý do, vui lòng liên hệ bộ phận hỗ trợ',
           [{ text: 'OK' }]
         );
       } else {
         // Going OFFLINE failed — still set local state to OFFLINE for safety
-        // (driver wants to stop, we should honor that locally)
         setIsOnline(false);
         setTripState('IDLE');
       }
