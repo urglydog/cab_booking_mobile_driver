@@ -12,6 +12,7 @@ export default function DriverAccountScreen() {
   const [driverPhone, setDriverPhone] = useState('090 123 4567');
   const [vehicleInfo, setVehicleInfo] = useState('Chưa kích hoạt');
   const [verificationStatus, setVerificationStatus] = useState<'PENDING' | 'APPROVED'>('PENDING');
+  const [accountStatus, setAccountStatus] = useState<'ACTIVE' | 'SUSPENDED' | 'PENDING_DELETION' | 'DELETED'>('ACTIVE');
   const [stats, setStats] = useState({ acceptRate: 100, cancelRate: 0, totalRides: 0 });
 
   const fetchStats = async () => {
@@ -65,10 +66,13 @@ export default function DriverAccountScreen() {
           const profile = res.data.result;
           setDriverName(profile.fullName || name);
           if (profile.phoneNumber) setDriverPhone(profile.phoneNumber);
+          if (profile.accountStatus) setAccountStatus(profile.accountStatus);
           if (profile.verificationStatus) {
             setVerificationStatus(profile.verificationStatus);
           }
-          if (profile.verificationStatus === 'APPROVED' && profile.vehiclePlate) {
+          if (profile.accountStatus === 'SUSPENDED') {
+            setVehicleInfo('Tài khoản đã bị chặn');
+          } else if (profile.verificationStatus === 'APPROVED' && profile.vehiclePlate) {
             let typeLabel = 'Xe 4 chỗ';
             if (profile.vehicleType === 'BIKE') typeLabel = 'Xe máy';
             else if (profile.vehicleType === 'CAR7') typeLabel = 'Xe 7 chỗ';
@@ -224,6 +228,18 @@ export default function DriverAccountScreen() {
                 🟢 DỊCH VỤ HOẠT ĐỘNG: {vehicleInfo.split(' • ')[0]?.toUpperCase()}
               </Text>
             </View>
+          </View>
+        )}
+
+        {accountStatus === 'SUSPENDED' && (
+          <View style={styles.blockedCard}>
+            <View style={styles.kycHeader}>
+              <Shield size={20} color="#DC2626" />
+              <Text style={styles.blockedTitle}>TÀI KHOẢN ĐÃ BỊ CHẶN</Text>
+            </View>
+            <Text style={styles.blockedDesc}>
+              Admin đã chặn tài khoản này. Bạn không thể bật Online hoặc nhận chuyến cho đến khi được mở chặn.
+            </Text>
           </View>
         )}
 
@@ -524,6 +540,14 @@ const styles = StyleSheet.create({
     borderColor: '#10B981',
     marginBottom: 16,
   },
+  blockedCard: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1.5,
+    borderColor: '#DC2626',
+    marginBottom: 16,
+  },
   approvedKycTitle: {
     fontSize: 12,
     fontWeight: '800',
@@ -533,6 +557,18 @@ const styles = StyleSheet.create({
   approvedKycDesc: {
     fontSize: 12,
     color: '#047857',
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  blockedTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#B91C1C',
+    letterSpacing: 0.5,
+  },
+  blockedDesc: {
+    fontSize: 12,
+    color: '#991B1B',
     fontWeight: '500',
     lineHeight: 18,
   },
